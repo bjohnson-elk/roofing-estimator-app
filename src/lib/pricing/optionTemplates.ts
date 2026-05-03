@@ -1,5 +1,64 @@
 import type { OptionTemplate } from "./types";
 
+const COMMON_MATERIAL_LINES = [
+  {
+    sourceType: "material" as const,
+    category: "flashing",
+    productName: "Generic Drip Edge Steel",
+    quantitySource: "drip_edge_lf" as const,
+    sortOrder: 70,
+  },
+  {
+    sourceType: "material" as const,
+    category: "nails",
+    productName: "Generic 1.25\" Coil Roofing",
+    quantitySource: "waste_squares" as const,
+    sortOrder: 71,
+  },
+  {
+    sourceType: "material" as const,
+    category: "nails",
+    productName: "Generic 1\" Plastic Top",
+    quantitySource: "roof_squares" as const,
+    sortOrder: 72,
+  },
+  {
+    sourceType: "material" as const,
+    category: "misc",
+    productName: "Generic Delivery Fee",
+    quantitySource: "fixed_1" as const,
+    sortOrder: 73,
+  },
+  {
+    sourceType: "material" as const,
+    category: "misc",
+    productName: "Generic Rainbuster Caulk",
+    quantitySource: "fixed_1" as const,
+    sortOrder: 74,
+  },
+  {
+    sourceType: "material" as const,
+    category: "misc",
+    productName: "Generic Spray Paint",
+    quantitySource: "fixed_1" as const,
+    sortOrder: 75,
+  },
+  {
+    sourceType: "material" as const,
+    category: "flashing",
+    productName: "Generic Step Flashing Galvanized",
+    quantitySource: "step_flashing_lf" as const,
+    sortOrder: 76,
+  },
+  {
+    sourceType: "material" as const,
+    category: "flashing",
+    productName: "Generic Valley Metal Painted W",
+    quantitySource: "valleys_lf" as const,
+    sortOrder: 77,
+  },
+];
+
 const BASE_LABOR_LINES = [
   {
     sourceType: "labor" as const,
@@ -84,6 +143,7 @@ function buildRoofingTemplate(params: {
             },
           ]
         : []),
+      ...COMMON_MATERIAL_LINES,
     ],
     laborLines: BASE_LABOR_LINES,
   };

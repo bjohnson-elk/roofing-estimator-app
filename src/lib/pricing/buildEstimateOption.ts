@@ -53,6 +53,10 @@ function findLaborItem(laborItems: LaborItem[], line: LaborTemplateLine): LaborI
   return item;
 }
 
+function hasPositiveQuantity(line: BuiltLineItem): boolean {
+  return line.measuredQuantity > 0 && line.orderQuantity > 0;
+}
+
 function buildMaterialLine(params: {
   estimateId?: string;
   templateLine: MaterialTemplateLine;
@@ -135,25 +139,29 @@ export function buildEstimateOption(params: {
   measurements: NormalizedMeasurements;
   template: OptionTemplate;
 }): BuiltEstimateOption {
-  const materialLines = params.template.materialLines.map((templateLine) =>
-    buildMaterialLine({
-      estimateId: params.input.estimateId,
-      templateLine,
-      pricingItem: findPricingItem(params.input.pricingItems, templateLine),
-      measurements: params.measurements,
-      targetMarginPercent: params.input.targetMarginPercent,
-    })
-  );
+  const materialLines = params.template.materialLines
+    .map((templateLine) =>
+      buildMaterialLine({
+        estimateId: params.input.estimateId,
+        templateLine,
+        pricingItem: findPricingItem(params.input.pricingItems, templateLine),
+        measurements: params.measurements,
+        targetMarginPercent: params.input.targetMarginPercent,
+      })
+    )
+    .filter(hasPositiveQuantity);
 
-  const laborLines = params.template.laborLines.map((templateLine) =>
-    buildLaborLine({
-      estimateId: params.input.estimateId,
-      templateLine,
-      laborItem: findLaborItem(params.input.laborItems, templateLine),
-      measurements: params.measurements,
-      targetMarginPercent: params.input.targetMarginPercent,
-    })
-  );
+  const laborLines = params.template.laborLines
+    .map((templateLine) =>
+      buildLaborLine({
+        estimateId: params.input.estimateId,
+        templateLine,
+        laborItem: findLaborItem(params.input.laborItems, templateLine),
+        measurements: params.measurements,
+        targetMarginPercent: params.input.targetMarginPercent,
+      })
+    )
+    .filter(hasPositiveQuantity);
 
   const lineItems = [...materialLines, ...laborLines].sort(
     (a, b) => a.sortOrder - b.sortOrder
