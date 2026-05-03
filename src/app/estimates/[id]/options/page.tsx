@@ -34,6 +34,14 @@ type PricingModeRow = {
   pricing_mode: string | null;
 };
 
+type V2PackageItemLine = {
+  estimate_option_id: string;
+  description: string | null;
+  line_type: string | null;
+  item_type: string | null;
+  sort_order: number | null;
+};
+
 type UpgradeSelection = {
   id: string;
   estimate_option_id: string;
@@ -334,6 +342,30 @@ function getAddsText(optionName: string, index: number) {
   return adds;
 }
 
+function isV2PackageDisplayLine(line: V2PackageItemLine) {
+  const lineKind = `${line.line_type ?? ""} ${line.item_type ?? ""}`.toLowerCase();
+
+  return !lineKind.includes("labor");
+}
+
+function getIncludedV2PackageItems(params: {
+  optionName: string;
+  index: number;
+  lines: V2PackageItemLine[];
+}) {
+  const items = new Set(getAddsText(params.optionName, params.index));
+
+  params.lines
+    .filter(isV2PackageDisplayLine)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .forEach((line) => {
+      const description = line.description?.trim();
+      if (description) items.add(description);
+    });
+
+  return Array.from(items);
+}
+
 function OptionSelect({
   label,
   value,
@@ -428,6 +460,38 @@ async function mergePricingModes(options: OptionRow[]) {
   });
 }
 
+async function loadV2PackageItemsByOptionId(options: OptionRow[]) {
+  const optionIds = options
+    .filter(isV2PricingOption)
+    .map((option) => getOptionId(option))
+    .filter(Boolean);
+
+  if (optionIds.length === 0) {
+    return new Map<string, V2PackageItemLine[]>();
+  }
+
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .select("estimate_option_id, description, line_type, item_type, sort_order")
+    .in("estimate_option_id", optionIds)
+    .eq("line_source", "v2_type_script_engine")
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    return new Map<string, V2PackageItemLine[]>();
+  }
+
+  return ((data ?? []) as V2PackageItemLine[]).reduce(
+    (itemsByOptionId, line) => {
+      const lines = itemsByOptionId.get(line.estimate_option_id) ?? [];
+      lines.push(line);
+      itemsByOptionId.set(line.estimate_option_id, lines);
+      return itemsByOptionId;
+    },
+    new Map<string, V2PackageItemLine[]>()
+  );
+}
+
 export default function EstimateOptionsPage() {
   const router = useRouter();
   const params = useParams();
@@ -440,6 +504,9 @@ export default function EstimateOptionsPage() {
     null
   );
   const [options, setOptions] = useState<OptionRow[]>([]);
+  const [v2PackageItemsByOptionId, setV2PackageItemsByOptionId] = useState(
+    new Map<string, V2PackageItemLine[]>()
+  );
   const [upgradeSelections, setUpgradeSelections] = useState<UpgradeSelection[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -484,6 +551,9 @@ export default function EstimateOptionsPage() {
       setErrorMessage(optionError.message);
     } else {
       setOptions(loadedOptionsWithPricingMode);
+      setV2PackageItemsByOptionId(
+        await loadV2PackageItemsByOptionId(loadedOptionsWithPricingMode)
+      );
     }
 
     const optionIds = loadedOptionsWithPricingMode
@@ -608,6 +678,9 @@ export default function EstimateOptionsPage() {
     const loadedOptions = (optionData ?? []) as OptionRow[];
     const loadedOptionsWithPricingMode = await mergePricingModes(loadedOptions);
     setOptions(loadedOptionsWithPricingMode);
+    setV2PackageItemsByOptionId(
+      await loadV2PackageItemsByOptionId(loadedOptionsWithPricingMode)
+    );
 
     const optionIds = loadedOptionsWithPricingMode
       .map((option) => getOptionId(option))
@@ -1019,6 +1092,12 @@ export default function EstimateOptionsPage() {
                         estimate.selected_option_name === optionName;
 
                       const adds = getAddsText(optionName, index);
+                      const isV2Option = isV2PricingOption(row);
+                      const includedV2PackageItems = getIncludedV2PackageItems({
+                        optionName,
+                        index,
+                        lines: v2PackageItemsByOptionId.get(optionId) ?? [],
+                      });
 
                       return (
                         <div
@@ -1096,43 +1175,61 @@ export default function EstimateOptionsPage() {
                             </ul>
                           </div>
 
-                          <div className="border-b border-slate-200 p-4">
-                            <div className="text-xs font-black uppercase tracking-wide text-slate-500">
-                              Available Upgrades
-                            </div>
+                          {isV2Option ? (
+                            <div className="border-b border-slate-200 p-4">
+                              <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                Included V2 Package Items
+                              </div>
 
-                            <div className="mt-3 grid gap-2">
-                              {upgradeDefinitions.map((upgrade) => {
-                                const active = activeUpgradeSet.has(
-                                  `${optionId}-${upgrade.name}`
-                                );
-                                const key = `${optionId}-${upgrade.name}`;
-                                const isApplying = applyingUpgrade === key;
+                              <ul className="mt-2 space-y-1 text-sm font-semibold text-slate-700">
+                                {includedV2PackageItems.map((item) => (
+                                  <li key={item}>• {item}</li>
+                                ))}
+                              </ul>
 
-                                return (
-                                  <button
-                                    key={upgrade.name}
-                                    type="button"
-                                    onClick={() =>
-                                      applyUpgrade(optionId, upgrade.name)
-                                    }
-                                    disabled={isApplying}
-                                    className={`rounded-md border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${
-                                      active
-                                        ? "border-green-300 bg-green-50 text-green-700"
-                                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                                    }`}
-                                  >
-                                    {isApplying
-                                      ? "Applying..."
-                                      : active
-                                      ? `✓ ${upgrade.name} - Click to remove`
-                                      : upgrade.name}
-                                  </button>
-                                );
-                              })}
+                              <p className="mt-3 text-xs font-semibold text-slate-500">
+                                V2 upgrades are managed in the pricing engine.
+                              </p>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="border-b border-slate-200 p-4">
+                              <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                Available Upgrades
+                              </div>
+
+                              <div className="mt-3 grid gap-2">
+                                {upgradeDefinitions.map((upgrade) => {
+                                  const active = activeUpgradeSet.has(
+                                    `${optionId}-${upgrade.name}`
+                                  );
+                                  const key = `${optionId}-${upgrade.name}`;
+                                  const isApplying = applyingUpgrade === key;
+
+                                  return (
+                                    <button
+                                      key={upgrade.name}
+                                      type="button"
+                                      onClick={() =>
+                                        applyUpgrade(optionId, upgrade.name)
+                                      }
+                                      disabled={isApplying}
+                                      className={`rounded-md border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${
+                                        active
+                                          ? "border-green-300 bg-green-50 text-green-700"
+                                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      {isApplying
+                                        ? "Applying..."
+                                        : active
+                                        ? `✓ ${upgrade.name} - Click to remove`
+                                        : upgrade.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
 
                           <div className="p-4">
                             <button
