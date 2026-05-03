@@ -85,6 +85,8 @@ function buildMaterialLine(params: {
     orderQuantity,
     unit: params.pricingItem.salesUnit,
     unitCost: params.pricingItem.costPerSalesUnit,
+    coveragePerSalesUnit: params.pricingItem.coveragePerSalesUnit,
+    salesUnit: params.pricingItem.salesUnit,
     ...pricing,
     calculationNote:
       params.templateLine.calculationNote ??
