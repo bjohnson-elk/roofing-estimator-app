@@ -4,6 +4,8 @@ import {
   findMissingCatalogItems,
   hasMissingCatalogItems,
   type BuiltEstimate,
+  type BuiltEstimateOption,
+  type BuiltLineItem,
   type MissingCatalogItems,
 } from "@/lib/pricing";
 import {
@@ -16,6 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { connection } from "next/server";
 
 const targetMarginPercent = 45;
+const targetMarginDecimal = targetMarginPercent / 100;
 
 const sampleMeasurements = {
   roofAreaSf: 2200,
@@ -103,6 +106,22 @@ function number(value: number) {
   }).format(value);
 }
 
+function roundCurrency(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function sumLineCosts(lines: BuiltLineItem[]): number {
+  return roundCurrency(lines.reduce((sum, line) => sum + line.totalCost, 0));
+}
+
+function sumLinePrices(lines: BuiltLineItem[]): number {
+  return roundCurrency(lines.reduce((sum, line) => sum + line.totalPrice, 0));
+}
+
+function expectedPriceFromMargin(cost: number): number {
+  return roundCurrency(cost / (1 - targetMarginDecimal));
+}
+
 export default async function PricingV2PreviewPage() {
   await connection();
 
@@ -119,6 +138,7 @@ export default async function PricingV2PreviewPage() {
 
   const sampleEstimate = result.estimate;
   const firstOption = sampleEstimate?.options[0] ?? null;
+  const auditLine = firstOption?.lineItems.find((line) => line.totalCost > 0);
 
   return (
     <main className="min-h-screen bg-slate-100 pl-[var(--sidebar-width,0px)]">
@@ -258,10 +278,118 @@ export default async function PricingV2PreviewPage() {
                 </table>
               </div>
             </section>
+
+            {auditLine ? (
+              <EngineAudit option={firstOption} auditLine={auditLine} />
+            ) : null}
           </>
         )}
       </div>
     </main>
+  );
+}
+
+function EngineAudit({
+  option,
+  auditLine,
+}: {
+  option: BuiltEstimateOption;
+  auditLine: BuiltLineItem;
+}) {
+  const materialLines = option.lineItems
+    .filter((line) => line.sourceType === "material")
+    .slice(0, 3);
+  const lineCostSum = sumLineCosts(option.lineItems);
+  const linePriceSum = sumLinePrices(option.lineItems);
+  const expectedLinePrice = expectedPriceFromMargin(auditLine.totalCost);
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-3 text-xl font-black text-slate-950">Engine Audit</h2>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="text-sm font-black uppercase tracking-wide text-slate-500">
+            Margin Formula
+          </h3>
+          <div className="mt-3 text-sm text-slate-700">
+            <div className="font-semibold text-slate-950">
+              {auditLine.description}
+            </div>
+            <div className="mt-2">
+              {money(auditLine.totalCost)} / (1 - {number(targetMarginDecimal)}) ={" "}
+              <span className="font-bold text-slate-950">
+                {money(expectedLinePrice)}
+              </span>
+            </div>
+            <div className="mt-1">
+              Rendered line price:{" "}
+              <span className="font-bold text-slate-950">
+                {money(auditLine.totalPrice)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="text-sm font-black uppercase tracking-wide text-slate-500">
+            Material Rounding
+          </h3>
+          <div className="mt-3 space-y-3 text-sm text-slate-700">
+            {materialLines.map((line) => (
+              <div key={`audit-${line.description}`}>
+                <div className="font-semibold text-slate-950">
+                  {line.description}
+                </div>
+                <div>
+                  ceil({number(line.measuredQuantity)} /{" "}
+                  {number(line.coveragePerSalesUnit ?? 1)}) ={" "}
+                  <span className="font-bold text-slate-950">
+                    {number(line.orderQuantity)}
+                  </span>{" "}
+                  {line.salesUnit ?? line.unit}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="text-sm font-black uppercase tracking-wide text-slate-500">
+            Option Totals
+          </h3>
+          <div className="mt-3 text-sm text-slate-700">
+            <div className="font-semibold text-slate-950">
+              {option.optionName}
+            </div>
+            <div className="mt-2">
+              Line cost sum:{" "}
+              <span className="font-bold text-slate-950">
+                {money(lineCostSum)}
+              </span>
+            </div>
+            <div>
+              Option cost:{" "}
+              <span className="font-bold text-slate-950">
+                {money(option.subtotalCost)}
+              </span>
+            </div>
+            <div className="mt-2">
+              Line price sum:{" "}
+              <span className="font-bold text-slate-950">
+                {money(linePriceSum)}
+              </span>
+            </div>
+            <div>
+              Option price:{" "}
+              <span className="font-bold text-slate-950">
+                {money(option.subtotalPrice)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
