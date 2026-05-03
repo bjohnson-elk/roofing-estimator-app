@@ -249,6 +249,10 @@ function getPricingMode(row: OptionRow) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function isV2PricingOption(row: OptionRow) {
+  return getPricingMode(row) === "v2_type_script_engine";
+}
+
 function getPricingModeGroupLabel(row: OptionRow) {
   const pricingMode = getPricingMode(row);
 
@@ -551,16 +555,32 @@ export default function EstimateOptionsPage() {
     });
   }, [options]);
 
+  const proposalOptions = useMemo(() => {
+    const v2Options = sortedOptions.filter(isV2PricingOption);
+
+    return v2Options.length > 0 ? v2Options : sortedOptions;
+  }, [sortedOptions]);
+
+  const proposalOptionIdSet = useMemo(() => {
+    return new Set(
+      proposalOptions.map((option) => getOptionId(option)).filter(Boolean)
+    );
+  }, [proposalOptions]);
+
+  function visibleProposalValue(value: string | null) {
+    return value && proposalOptionIdSet.has(value) ? value : "";
+  }
+
   const optionById = useMemo(() => {
     const map = new Map<string, OptionRow>();
 
-    for (const option of sortedOptions) {
+    for (const option of proposalOptions) {
       const optionId = getOptionId(option);
       if (optionId) map.set(optionId, option);
     }
 
     return map;
-  }, [sortedOptions]);
+  }, [proposalOptions]);
 
   const activeUpgradeSet = useMemo(() => {
     return new Set(
@@ -612,16 +632,16 @@ export default function EstimateOptionsPage() {
   }
 
   const displayedOptions = useMemo(() => {
-    if (!proposalConfig) return sortedOptions;
+    if (!proposalConfig) return proposalOptions;
 
     if (proposalConfig.proposal_type === "Cheapest Option") {
-      return sortedOptions.slice(0, 1);
+      return proposalOptions.slice(0, 1);
     }
 
     if (proposalConfig.proposal_type === "Single Estimate") {
       const option = proposalConfig.single_option_id
-        ? optionById.get(proposalConfig.single_option_id)
-        : sortedOptions[0];
+        ? optionById.get(proposalConfig.single_option_id) ?? proposalOptions[0]
+        : proposalOptions[0];
 
       return option ? [option] : [];
     }
@@ -629,30 +649,30 @@ export default function EstimateOptionsPage() {
     if (proposalConfig.proposal_type === "Option A/B") {
       return [
         proposalConfig.option_a_id
-          ? optionById.get(proposalConfig.option_a_id)
-          : sortedOptions[0],
+          ? optionById.get(proposalConfig.option_a_id) ?? proposalOptions[0]
+          : proposalOptions[0],
         proposalConfig.option_b_id
-          ? optionById.get(proposalConfig.option_b_id)
-          : sortedOptions[1],
+          ? optionById.get(proposalConfig.option_b_id) ?? proposalOptions[1]
+          : proposalOptions[1],
       ].filter(Boolean) as OptionRow[];
     }
 
     if (proposalConfig.proposal_type === "Good Better Best") {
       return [
         proposalConfig.good_option_id
-          ? optionById.get(proposalConfig.good_option_id)
-          : sortedOptions[0],
+          ? optionById.get(proposalConfig.good_option_id) ?? proposalOptions[0]
+          : proposalOptions[0],
         proposalConfig.better_option_id
-          ? optionById.get(proposalConfig.better_option_id)
-          : sortedOptions[1],
+          ? optionById.get(proposalConfig.better_option_id) ?? proposalOptions[1]
+          : proposalOptions[1],
         proposalConfig.best_option_id
-          ? optionById.get(proposalConfig.best_option_id)
-          : sortedOptions[2],
+          ? optionById.get(proposalConfig.best_option_id) ?? proposalOptions[2]
+          : proposalOptions[2],
       ].filter(Boolean) as OptionRow[];
     }
 
-    return sortedOptions;
-  }, [optionById, proposalConfig, sortedOptions]);
+    return proposalOptions;
+  }, [optionById, proposalConfig, proposalOptions]);
 
   async function updateProposalConfig(update: Partial<ProposalConfig>) {
     if (!estimate || !proposalConfig) return;
@@ -887,8 +907,10 @@ export default function EstimateOptionsPage() {
                         {proposalConfig.proposal_type === "Single Estimate" && (
                           <OptionSelect
                             label="Single Estimate"
-                            value={proposalConfig.single_option_id ?? ""}
-                            options={sortedOptions}
+                            value={visibleProposalValue(
+                              proposalConfig.single_option_id
+                            )}
+                            options={proposalOptions}
                             onChange={(value) =>
                               updateProposalConfig({
                                 single_option_id: value,
@@ -901,8 +923,10 @@ export default function EstimateOptionsPage() {
                           <>
                             <OptionSelect
                               label="Option A"
-                              value={proposalConfig.option_a_id ?? ""}
-                              options={sortedOptions}
+                              value={visibleProposalValue(
+                                proposalConfig.option_a_id
+                              )}
+                              options={proposalOptions}
                               onChange={(value) =>
                                 updateProposalConfig({
                                   option_a_id: value,
@@ -912,8 +936,10 @@ export default function EstimateOptionsPage() {
 
                             <OptionSelect
                               label="Option B"
-                              value={proposalConfig.option_b_id ?? ""}
-                              options={sortedOptions}
+                              value={visibleProposalValue(
+                                proposalConfig.option_b_id
+                              )}
+                              options={proposalOptions}
                               onChange={(value) =>
                                 updateProposalConfig({
                                   option_b_id: value,
@@ -927,8 +953,10 @@ export default function EstimateOptionsPage() {
                           <>
                             <OptionSelect
                               label="Good"
-                              value={proposalConfig.good_option_id ?? ""}
-                              options={sortedOptions}
+                              value={visibleProposalValue(
+                                proposalConfig.good_option_id
+                              )}
+                              options={proposalOptions}
                               onChange={(value) =>
                                 updateProposalConfig({
                                   good_option_id: value,
@@ -938,8 +966,10 @@ export default function EstimateOptionsPage() {
 
                             <OptionSelect
                               label="Better"
-                              value={proposalConfig.better_option_id ?? ""}
-                              options={sortedOptions}
+                              value={visibleProposalValue(
+                                proposalConfig.better_option_id
+                              )}
+                              options={proposalOptions}
                               onChange={(value) =>
                                 updateProposalConfig({
                                   better_option_id: value,
@@ -949,8 +979,10 @@ export default function EstimateOptionsPage() {
 
                             <OptionSelect
                               label="Best"
-                              value={proposalConfig.best_option_id ?? ""}
-                              options={sortedOptions}
+                              value={visibleProposalValue(
+                                proposalConfig.best_option_id
+                              )}
+                              options={proposalOptions}
                               onChange={(value) =>
                                 updateProposalConfig({
                                   best_option_id: value,
