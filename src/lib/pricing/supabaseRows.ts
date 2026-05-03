@@ -1,4 +1,35 @@
-import type { BuiltEstimateOption, BuiltLineItem } from "./types";
+import type {
+  BuiltEstimateOption,
+  BuiltLineItem,
+  LaborItem,
+  PricingItem,
+} from "./types";
+
+export interface PricingItemSelectRow {
+  id: string;
+  category: string | null;
+  brand?: string | null;
+  name?: string | null;
+  product_name?: string | null;
+  install_unit?: string | null;
+  unit?: string | null;
+  sales_unit?: string | null;
+  coverage_per_sales_unit?: number | null;
+  cost_per_sales_unit?: number | null;
+  unit_cost?: number | null;
+  active?: boolean | null;
+}
+
+export interface LaborItemSelectRow {
+  id: string;
+  subcontractor?: string | null;
+  item?: string | null;
+  name?: string | null;
+  unit?: string | null;
+  cost_per_unit?: number | null;
+  unit_cost?: number | null;
+  active?: boolean | null;
+}
 
 export interface EstimateOptionInsertRow {
   estimate_id: string;
@@ -52,6 +83,78 @@ function mapLineType(line: BuiltLineItem): string {
   if (line.sourceType === "material") return "material";
   if (line.sourceType === "labor") return "labor";
   return line.sourceType;
+}
+
+function requireText(value: string | null | undefined, fieldName: string): string {
+  const text = value?.trim();
+
+  if (!text) {
+    throw new Error(`Missing required ${fieldName}.`);
+  }
+
+  return text;
+}
+
+function requireNumber(
+  value: number | null | undefined,
+  fieldName: string
+): number {
+  if (!Number.isFinite(value)) {
+    throw new Error(`Missing required ${fieldName}.`);
+  }
+
+  return Number(value);
+}
+
+export function pricingItemFromSupabaseRow(
+  row: PricingItemSelectRow
+): PricingItem {
+  return {
+    id: requireText(row.id, "pricing item id"),
+    category: requireText(row.category, "pricing item category"),
+    brand: row.brand ?? null,
+    name: requireText(row.name ?? row.product_name, "pricing item name"),
+    installUnit: requireText(
+      row.install_unit ?? row.unit,
+      "pricing item install unit"
+    ),
+    salesUnit: requireText(row.sales_unit, "pricing item sales unit"),
+    coveragePerSalesUnit: requireNumber(
+      row.coverage_per_sales_unit,
+      "pricing item coverage per sales unit"
+    ),
+    costPerSalesUnit: requireNumber(
+      row.cost_per_sales_unit ?? row.unit_cost,
+      "pricing item cost per sales unit"
+    ),
+    active: row.active ?? true,
+  };
+}
+
+export function laborItemFromSupabaseRow(row: LaborItemSelectRow): LaborItem {
+  return {
+    id: requireText(row.id, "labor item id"),
+    subcontractor: row.subcontractor ?? null,
+    item: requireText(row.item ?? row.name, "labor item"),
+    unit: requireText(row.unit, "labor item unit"),
+    costPerUnit: requireNumber(
+      row.cost_per_unit ?? row.unit_cost,
+      "labor item cost per unit"
+    ),
+    active: row.active ?? true,
+  };
+}
+
+export function pricingItemsFromSupabaseRows(
+  rows: PricingItemSelectRow[]
+): PricingItem[] {
+  return rows.map(pricingItemFromSupabaseRow);
+}
+
+export function laborItemsFromSupabaseRows(
+  rows: LaborItemSelectRow[]
+): LaborItem[] {
+  return rows.map(laborItemFromSupabaseRow);
 }
 
 export function toEstimateOptionInsertRows(params: {
