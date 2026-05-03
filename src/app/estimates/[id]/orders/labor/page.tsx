@@ -245,13 +245,18 @@ function isLaborLine(line: LineItem) {
   return Boolean(line.labor_item_id) || type.includes("labor");
 }
 
+function isV2LaborLine(line: LineItem) {
+  return line.line_source === "v2_pricing_engine" && isLaborLine(line);
+}
+
 function normalizeLaborLine(line: LineItem): LaborLine {
   return {
     description: line.description || "Unnamed labor item",
     unit: line.unit || "EA",
     quantity: line.quantity ?? line.measured_quantity ?? null,
-    orderQuantity:
-      line.order_quantity ?? line.quantity ?? line.measured_quantity ?? null,
+    orderQuantity: isV2LaborLine(line)
+      ? line.measured_quantity ?? line.order_quantity ?? line.quantity ?? null
+      : line.order_quantity ?? line.quantity ?? line.measured_quantity ?? null,
   };
 }
 
