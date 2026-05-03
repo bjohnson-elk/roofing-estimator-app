@@ -7,16 +7,18 @@ import type {
 
 export interface PricingItemSelectRow {
   id: string;
-  category: string | null;
+  category?: string | null;
   brand?: string | null;
   name?: string | null;
   product_name?: string | null;
+  type?: string | null;
   install_unit?: string | null;
   unit?: string | null;
   sales_unit?: string | null;
   coverage_per_sales_unit?: number | null;
   cost_per_sales_unit?: number | null;
   unit_cost?: number | null;
+  price?: number | null;
   active?: boolean | null;
 }
 
@@ -106,14 +108,62 @@ function requireNumber(
   return Number(value);
 }
 
+function normalizePricingCategory(
+  value: string | null | undefined
+): string | null | undefined {
+  const text = value?.trim();
+
+  if (!text) return text;
+
+  const knownCategories: Record<string, string> = {
+    "ice & water": "ice and water",
+    "ice and water": "ice and water",
+    icewater: "ice and water",
+    ridgecap: "ridge cap",
+    "ridge cap": "ridge cap",
+    shingle: "shingles",
+    shingles: "shingles",
+    starter: "starter",
+    underlayment: "felt",
+    felt: "felt",
+    vent: "vent",
+    vents: "vent",
+  };
+
+  return knownCategories[text.toLowerCase()] ?? text;
+}
+
+function productNameWithBrand(row: PricingItemSelectRow): string | null | undefined {
+  const productName = row.product_name?.trim();
+
+  if (productName) return productName;
+  if (!row.brand || !row.name) return row.name;
+
+  const normalizedBrand = row.brand.trim().toLowerCase();
+  const normalizedName = row.name.trim().toLowerCase();
+
+  if (normalizedBrand === "gaf" && normalizedName === "ridge runner") {
+    return "GAF Cobra Ridge Runner";
+  }
+
+  if (normalizedName.startsWith(`${normalizedBrand} `)) {
+    return row.name;
+  }
+
+  return `${row.brand} ${row.name}`;
+}
+
 export function pricingItemFromSupabaseRow(
   row: PricingItemSelectRow
 ): PricingItem {
   return {
     id: requireText(row.id, "pricing item id"),
-    category: requireText(row.category, "pricing item category"),
+    category: requireText(
+      normalizePricingCategory(row.category ?? row.type),
+      "pricing item category"
+    ),
     brand: row.brand ?? null,
-    name: requireText(row.name ?? row.product_name, "pricing item name"),
+    name: requireText(productNameWithBrand(row), "pricing item name"),
     installUnit: requireText(
       row.install_unit ?? row.unit,
       "pricing item install unit"
@@ -124,7 +174,7 @@ export function pricingItemFromSupabaseRow(
       "pricing item coverage per sales unit"
     ),
     costPerSalesUnit: requireNumber(
-      row.cost_per_sales_unit ?? row.unit_cost,
+      row.cost_per_sales_unit ?? row.unit_cost ?? row.price,
       "pricing item cost per sales unit"
     ),
     active: row.active ?? true,
