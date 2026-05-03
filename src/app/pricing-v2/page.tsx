@@ -1,176 +1,63 @@
 import AppSidebar from "@/components/AppSidebar";
 import { buildEstimate } from "@/lib/pricing";
-import type { LaborItem, PricingItem } from "@/lib/pricing";
+import {
+  laborItemsFromSupabaseRows,
+  pricingItemsFromSupabaseRows,
+  type LaborItemSelectRow,
+  type PricingItemSelectRow,
+} from "@/lib/pricing/supabaseRows";
+import { supabase } from "@/lib/supabase";
+import { connection } from "next/server";
 
-const samplePricingItems: PricingItem[] = [
-  {
-    id: "price-gaf-timberline-ns",
-    category: "shingles",
-    brand: "GAF",
-    name: "GAF Timberline NS",
-    installUnit: "SQ",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 0.333333,
-    costPerSalesUnit: 34,
-  },
-  {
-    id: "price-gaf-timberline-hdz",
-    category: "shingles",
-    brand: "GAF",
-    name: "GAF Timberline HDZ",
-    installUnit: "SQ",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 0.333333,
-    costPerSalesUnit: 39,
-  },
-  {
-    id: "price-gaf-timberline-uhdz",
-    category: "shingles",
-    brand: "GAF",
-    name: "GAF Timberline UHDZ",
-    installUnit: "SQ",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 0.333333,
-    costPerSalesUnit: 55,
-  },
-  {
-    id: "price-gaf-grand-sequoia",
-    category: "shingles",
-    brand: "GAF",
-    name: "GAF Grand Sequoia",
-    installUnit: "SQ",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 0.333333,
-    costPerSalesUnit: 82,
-  },
-  {
-    id: "price-epilay-protectite-superior",
-    category: "felt",
-    brand: "Epilay",
-    name: "Epilay ProtecTite Superior",
-    installUnit: "SQ",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 10,
-    costPerSalesUnit: 82,
-  },
-  {
-    id: "price-gaf-feltbuster",
-    category: "felt",
-    brand: "GAF",
-    name: "GAF FeltBuster",
-    installUnit: "SQ",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 10,
-    costPerSalesUnit: 116,
-  },
-  {
-    id: "price-gaf-tiger-paw",
-    category: "felt",
-    brand: "GAF",
-    name: "GAF Tiger Paw",
-    installUnit: "SQ",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 10,
-    costPerSalesUnit: 148,
-  },
-  {
-    id: "price-epilay-roofnado-ht",
-    category: "ice and water",
-    brand: "Epilay",
-    name: "Epilay Roofnado HT",
-    installUnit: "LF",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 66,
-    costPerSalesUnit: 91,
-  },
-  {
-    id: "price-gaf-weatherwatch",
-    category: "ice and water",
-    brand: "GAF",
-    name: "GAF WeatherWatch",
-    installUnit: "LF",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 66,
-    costPerSalesUnit: 104,
-  },
-  {
-    id: "price-gaf-prostart",
-    category: "starter",
-    brand: "GAF",
-    name: "GAF ProStart",
-    installUnit: "LF",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 120,
-    costPerSalesUnit: 47,
-  },
-  {
-    id: "price-gaf-seal-a-ridge",
-    category: "ridge cap",
-    brand: "GAF",
-    name: "GAF Seal-A-Ridge",
-    installUnit: "LF",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 25,
-    costPerSalesUnit: 69,
-  },
-  {
-    id: "price-gaf-timbercrest",
-    category: "ridge cap",
-    brand: "GAF",
-    name: "GAF Timbercrest",
-    installUnit: "LF",
-    salesUnit: "bundle",
-    coveragePerSalesUnit: 20,
-    costPerSalesUnit: 109,
-  },
-  {
-    id: "price-gaf-cobra-ridge-runner",
-    category: "vent",
-    brand: "GAF",
-    name: "GAF Cobra Ridge Runner",
-    installUnit: "LF",
-    salesUnit: "roll",
-    coveragePerSalesUnit: 30,
-    costPerSalesUnit: 88,
-  },
-];
+const targetMarginPercent = 45;
 
-const sampleLaborItems: LaborItem[] = [
-  {
-    id: "labor-install-shingles",
-    item: "Install shingles",
-    unit: "SQ",
-    costPerUnit: 62,
-  },
-  {
-    id: "labor-tear-off-shingles",
-    item: "Tear off shingles",
-    unit: "SQ",
-    costPerUnit: 42,
-  },
-  {
-    id: "labor-dump-trailer",
-    item: "Dump trailer",
-    unit: "EA",
-    costPerUnit: 575,
-  },
-];
+const sampleMeasurements = {
+  roofAreaSf: 2200,
+  wastePercent: 10,
+  eavesLf: 128,
+  rakesLf: 96,
+  hipsLf: 42,
+  ridgesLf: 58,
+  iceWaterLf: 164,
+};
 
-const sampleEstimate = buildEstimate({
-  estimateId: "preview-estimate",
-  targetMarginPercent: 45,
-  measurements: {
-    roofAreaSf: 2200,
-    wastePercent: 10,
-    eavesLf: 128,
-    rakesLf: 96,
-    hipsLf: 42,
-    ridgesLf: 58,
-    iceWaterLf: 164,
-  },
-  pricingItems: samplePricingItems,
-  laborItems: sampleLaborItems,
-});
+async function loadSampleEstimate() {
+  const [pricingResult, laborResult] = await Promise.all([
+    supabase.from("pricing_items").select("*").eq("active", true),
+    supabase.from("labor_items").select("*").eq("active", true),
+  ]);
+
+  if (pricingResult.error) {
+    throw new Error(`Could not load pricing items: ${pricingResult.error.message}`);
+  }
+
+  if (laborResult.error) {
+    throw new Error(`Could not load labor items: ${laborResult.error.message}`);
+  }
+
+  const pricingItems = pricingItemsFromSupabaseRows(
+    (pricingResult.data ?? []) as PricingItemSelectRow[]
+  );
+  const laborItems = laborItemsFromSupabaseRows(
+    (laborResult.data ?? []) as LaborItemSelectRow[]
+  );
+
+  if (pricingItems.length === 0) {
+    throw new Error("No active pricing items were found.");
+  }
+
+  if (laborItems.length === 0) {
+    throw new Error("No active labor items were found.");
+  }
+
+  return buildEstimate({
+    estimateId: "preview-estimate",
+    targetMarginPercent,
+    measurements: sampleMeasurements,
+    pricingItems,
+    laborItems,
+  });
+}
 
 function money(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -186,8 +73,21 @@ function number(value: number) {
   }).format(value);
 }
 
-export default function PricingV2PreviewPage() {
-  const firstOption = sampleEstimate.options[0];
+export default async function PricingV2PreviewPage() {
+  await connection();
+
+  const result = await loadSampleEstimate()
+    .then((estimate) => ({ estimate, errorMessage: null }))
+    .catch((error: unknown) => ({
+      estimate: null,
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : "Could not load the v2 pricing preview.",
+    }));
+
+  const sampleEstimate = result.estimate;
+  const firstOption = sampleEstimate?.options[0] ?? null;
 
   return (
     <main className="min-h-screen bg-slate-100 pl-[var(--sidebar-width,0px)]">
@@ -202,6 +102,19 @@ export default function PricingV2PreviewPage() {
             Estimate Option Preview
           </h1>
         </div>
+
+        {result.errorMessage || !sampleEstimate || !firstOption ? (
+          <section className="rounded-lg border border-red-200 bg-white p-6">
+            <h2 className="text-xl font-black text-red-700">
+              Pricing preview unavailable
+            </h2>
+            <p className="mt-2 text-sm text-slate-700">
+              {result.errorMessage ??
+                "The active pricing data did not produce a preview option."}
+            </p>
+          </section>
+        ) : (
+          <>
 
         <section className="mb-6 grid gap-4 md:grid-cols-5">
           <Metric
@@ -304,6 +217,8 @@ export default function PricingV2PreviewPage() {
             </table>
           </div>
         </section>
+          </>
+        )}
       </div>
     </main>
   );
