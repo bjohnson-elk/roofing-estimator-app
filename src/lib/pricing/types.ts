@@ -135,6 +135,8 @@ export interface BuiltLineItem {
   orderQuantity: number;
   unit: string;
   unitCost: number;
+  coveragePerSalesUnit?: number;
+  salesUnit?: string;
   totalCost: number;
   sellPrice: number;
   totalPrice: number;
