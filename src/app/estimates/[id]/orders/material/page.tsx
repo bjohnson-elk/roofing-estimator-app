@@ -247,7 +247,7 @@ export default function MaterialOrderPage() {
         return;
       }
 
-      setEstimate(estimateData as Estimate);
+      setEstimate(estimateData as unknown as Estimate);
 
       const { data: lineData, error: lineError } = await supabase
         .from("estimate_line_items")
@@ -274,7 +274,7 @@ export default function MaterialOrderPage() {
       if (lineError) {
         setErrorMessage(lineError.message);
       } else {
-        setLineItems((lineData ?? []) as LineItem[]);
+        setLineItems((lineData ?? []) as unknown as LineItem[]);
       }
 
       setLoading(false);
