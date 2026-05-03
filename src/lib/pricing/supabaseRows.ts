@@ -108,6 +108,19 @@ function requireNumber(
   return Number(value);
 }
 
+function databaseOrderQuantityFromSavedQuantity(line: BuiltLineItem): number {
+  if (line.orderQuantity <= 0) return 0;
+
+  return Math.ceil(line.orderQuantity);
+}
+
+function divideOrZero(numerator: number, denominator: number): number {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return 0;
+  if (denominator === 0) return 0;
+
+  return numerator / denominator;
+}
+
 function normalizePricingCategory(
   value: string | null | undefined
 ): string | null | undefined {
@@ -235,28 +248,32 @@ export function toEstimateLineItemInsertRows(params: {
 }): EstimateLineItemInsertRow[] {
   const estimateId = requireEstimateId(params.option);
 
-  return params.option.lineItems.map((line) => ({
-    estimate_id: estimateId,
-    estimate_option_id: params.estimateOptionId,
-    pricing_item_id: line.pricingItemId ?? null,
-    labor_item_id: line.laborItemId ?? null,
-    line_type: mapLineType(line),
-    item_type: line.sourceType,
-    line_source: "v2_pricing_engine",
-    description: line.description,
-    measured_quantity: line.measuredQuantity,
-    quantity: line.measuredQuantity,
-    order_quantity: line.orderQuantity,
-    unit: line.unit,
-    unit_cost: line.unitCost,
-    total_cost: line.totalCost,
-    sell_price: line.sellPrice,
-    total_price: line.totalPrice,
-    sort_order: line.sortOrder,
-    coverage_per_sales_unit: line.coveragePerSalesUnit ?? null,
-    sales_unit: line.salesUnit ?? null,
-    pricing_basis: line.calculationNote,
-  }));
+  return params.option.lineItems.map((line) => {
+    const recalculatedOrderQuantity = databaseOrderQuantityFromSavedQuantity(line);
+
+    return {
+      estimate_id: estimateId,
+      estimate_option_id: params.estimateOptionId,
+      pricing_item_id: null,
+      labor_item_id: null,
+      line_type: mapLineType(line),
+      item_type: line.sourceType,
+      line_source: "v2_pricing_engine",
+      description: line.description,
+      measured_quantity: line.measuredQuantity,
+      quantity: line.orderQuantity,
+      order_quantity: line.orderQuantity,
+      unit: line.unit,
+      unit_cost: divideOrZero(line.totalCost, recalculatedOrderQuantity),
+      total_cost: line.totalCost,
+      sell_price: divideOrZero(line.totalPrice, line.orderQuantity),
+      total_price: line.totalPrice,
+      sort_order: line.sortOrder,
+      coverage_per_sales_unit: 1,
+      sales_unit: line.salesUnit ?? null,
+      pricing_basis: line.calculationNote,
+    };
+  });
 }
 
 export function toEstimateLineItemInsertRowsByOptionId(params: {
