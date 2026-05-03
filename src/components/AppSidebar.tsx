@@ -15,6 +15,7 @@ const navItems = [
   { label: "Measurements", href: "/measurements" },
   { label: "Proposals", href: "/proposals" },
   { label: "Orders", href: "/orders" },
+  { label: "Pricing V2", href: "/pricing-v2" },
   { label: "Reports", href: "/reports" },
   { label: "Settings", href: "/settings" },
 ];
