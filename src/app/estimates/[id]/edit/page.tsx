@@ -260,7 +260,7 @@ export default function EditEstimateInfoPage() {
       if (error) {
         setErrorMessage(error.message);
       } else {
-        const loaded = data as Estimate;
+        const loaded = data as unknown as Estimate;
         setEstimate(loaded);
 
         setCustomerName(loaded.customer_name ?? "");
