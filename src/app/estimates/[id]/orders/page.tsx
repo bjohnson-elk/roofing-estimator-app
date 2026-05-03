@@ -190,7 +190,7 @@ function getOrderSquares(estimate: {
 
   if (!roofSquares && !wasteSquares) return null;
 
-  return roofSquares + wasteSquares;
+  return wasteSquares || roofSquares;
 }
 
 function getShingleColorOptions(estimate: Estimate | null) {
@@ -297,15 +297,12 @@ function isLaborLine(line: LineItem) {
 }
 
 function isMaterialLine(line: LineItem) {
-  const type = `${line.item_type || ""} ${line.line_type || ""} ${
-    line.line_source || ""
-  }`.toLowerCase();
+  const type = `${line.item_type || ""} ${line.line_type || ""}`.toLowerCase();
 
   return (
     Boolean(line.pricing_item_id) ||
     type.includes("material") ||
-    type.includes("product") ||
-    type.includes("pricing")
+    type.includes("product")
   );
 }
 
