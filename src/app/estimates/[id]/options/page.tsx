@@ -29,6 +29,11 @@ type ProposalConfig = {
 
 type OptionRow = Record<string, unknown>;
 
+type PricingModeRow = {
+  id: string;
+  pricing_mode: string | null;
+};
+
 type UpgradeSelection = {
   id: string;
   estimate_option_id: string;
@@ -238,6 +243,26 @@ function getUpgradeDifference(row: OptionRow) {
   ]);
 }
 
+function getPricingMode(row: OptionRow) {
+  const value = row.pricing_mode;
+
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getPricingModeGroupLabel(row: OptionRow) {
+  const pricingMode = getPricingMode(row);
+
+  if (pricingMode === "v2_type_script_engine") {
+    return "V2 pricing";
+  }
+
+  if (!pricingMode || pricingMode === "retail" || pricingMode === "legacy") {
+    return "Legacy pricing";
+  }
+
+  return "Other pricing";
+}
+
 function getTierLabel(index: number, proposalType: string) {
   if (proposalType === "Good Better Best") {
     if (index === 0) return "Good";
@@ -316,6 +341,20 @@ function OptionSelect({
   options: OptionRow[];
   onChange: (value: string) => void;
 }) {
+  const groupedOptions = options.reduce<
+    Record<string, Array<{ option: OptionRow; index: number }>>
+  >((groups, option, index) => {
+    const label = getPricingModeGroupLabel(option);
+
+    groups[label] = groups[label] ?? [];
+    groups[label].push({ option, index });
+
+    return groups;
+  }, {});
+  const groupLabels = ["V2 pricing", "Legacy pricing", "Other pricing"].filter(
+    (label) => (groupedOptions[label]?.length ?? 0) > 0
+  );
+
   return (
     <div>
       <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
@@ -327,20 +366,62 @@ function OptionSelect({
         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold"
       >
         <option value="">Select option</option>
-        {options.map((option, index) => {
-          const optionId = getOptionId(option);
-          const optionName = getOptionName(option, index);
-          const price = getOptionPrice(option);
+        {groupLabels.map((groupLabel) => (
+          <optgroup key={groupLabel} label={groupLabel}>
+            {groupedOptions[groupLabel].map(({ option, index }) => {
+              const optionId = getOptionId(option);
+              const optionName = getOptionName(option, index);
+              const price = getOptionPrice(option);
 
-          return (
-            <option key={optionId || optionName} value={optionId}>
-              {optionName} — {formatMoney(price)}
-            </option>
-          );
-        })}
+              return (
+                <option key={optionId || optionName} value={optionId}>
+                  {optionName} — {formatMoney(price)}
+                </option>
+              );
+            })}
+          </optgroup>
+        ))}
       </select>
     </div>
   );
+}
+
+async function loadPricingModesByOptionId(optionIds: string[]) {
+  if (optionIds.length === 0) {
+    return new Map<string, string | null>();
+  }
+
+  const { data, error } = await supabase
+    .from("estimate_options")
+    .select("id, pricing_mode")
+    .in("id", optionIds);
+
+  if (error) {
+    return new Map<string, string | null>();
+  }
+
+  return new Map(
+    ((data ?? []) as PricingModeRow[]).map((row) => [
+      row.id,
+      row.pricing_mode,
+    ])
+  );
+}
+
+async function mergePricingModes(options: OptionRow[]) {
+  const optionIds = options.map((option) => getOptionId(option)).filter(Boolean);
+  const pricingModeByOptionId = await loadPricingModesByOptionId(optionIds);
+
+  return options.map((option) => {
+    const optionId = getOptionId(option);
+
+    return {
+      ...option,
+      pricing_mode: optionId
+        ? pricingModeByOptionId.get(optionId) ?? null
+        : null,
+    };
+  });
 }
 
 export default function EstimateOptionsPage() {
@@ -390,14 +471,18 @@ export default function EstimateOptionsPage() {
       .eq("estimate_id", estimateId);
 
     const loadedOptions = (optionData ?? []) as OptionRow[];
+    const loadedOptionsWithPricingMode =
+      optionError || loadedOptions.length === 0
+        ? loadedOptions
+        : await mergePricingModes(loadedOptions);
 
     if (optionError) {
       setErrorMessage(optionError.message);
     } else {
-      setOptions(loadedOptions);
+      setOptions(loadedOptionsWithPricingMode);
     }
 
-    const optionIds = loadedOptions
+    const optionIds = loadedOptionsWithPricingMode
       .map((option) => getOptionId(option))
       .filter(Boolean);
 
@@ -427,7 +512,7 @@ export default function EstimateOptionsPage() {
     } else if (configData) {
       setProposalConfig(configData as ProposalConfig);
     } else {
-      const cheapestOption = [...((optionData ?? []) as OptionRow[])].sort(
+      const cheapestOption = [...loadedOptionsWithPricingMode].sort(
         (a, b) => (getOptionPrice(a) ?? 0) - (getOptionPrice(b) ?? 0)
       )[0];
 
@@ -501,9 +586,10 @@ export default function EstimateOptionsPage() {
     }
 
     const loadedOptions = (optionData ?? []) as OptionRow[];
-    setOptions(loadedOptions);
+    const loadedOptionsWithPricingMode = await mergePricingModes(loadedOptions);
+    setOptions(loadedOptionsWithPricingMode);
 
-    const optionIds = loadedOptions
+    const optionIds = loadedOptionsWithPricingMode
       .map((option) => getOptionId(option))
       .filter(Boolean);
 
