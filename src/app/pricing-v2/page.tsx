@@ -1,4 +1,5 @@
 import AppSidebar from "@/components/AppSidebar";
+import SaveV2PreviewOptions from "./SaveV2PreviewOptions";
 import {
   buildEstimate,
   findMissingCatalogItems,
@@ -277,6 +278,11 @@ export default async function PricingV2PreviewPage({
   const sampleEstimate = result.estimate;
   const firstOption = sampleEstimate?.options[0] ?? null;
   const auditLine = firstOption?.lineItems.find((line) => line.totalCost > 0);
+  const lineItemCount =
+    sampleEstimate?.options.reduce(
+      (count, option) => count + option.lineItems.length,
+      0
+    ) ?? 0;
 
   return (
     <main className="min-h-screen bg-slate-100 pl-[var(--sidebar-width,0px)]">
@@ -370,6 +376,14 @@ export default async function PricingV2PreviewPage({
                 </tbody>
               </table>
             </section>
+
+            {estimateId ? (
+              <SaveV2PreviewOptions
+                estimateId={estimateId}
+                optionCount={sampleEstimate.options.length}
+                lineItemCount={lineItemCount}
+              />
+            ) : null}
 
             <section className="mt-8">
               <h2 className="mb-3 text-xl font-black text-slate-950">
