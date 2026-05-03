@@ -6,6 +6,7 @@ import {
   type BuiltEstimate,
   type BuiltEstimateOption,
   type BuiltLineItem,
+  type EstimateMeasurements,
   type MissingCatalogItems,
 } from "@/lib/pricing";
 import {
@@ -20,7 +21,7 @@ import { connection } from "next/server";
 const targetMarginPercent = 45;
 const targetMarginDecimal = targetMarginPercent / 100;
 
-const sampleMeasurements = {
+const sampleMeasurements: EstimateMeasurements = {
   roofAreaSf: 2200,
   wastePercent: 10,
   eavesLf: 128,
@@ -30,16 +31,145 @@ const sampleMeasurements = {
   iceWaterLf: 164,
 };
 
+const estimateMeasurementSelect = [
+  "id",
+  "roof_area_sf",
+  "roof_squares",
+  "waste_percent",
+  "eaves_lf",
+  "rakes_lf",
+  "hips_lf",
+  "ridges_lf",
+  "valleys_lf",
+  "flashing_lf",
+  "step_flashing_lf",
+  "drip_edge_lf",
+  "starter_lf",
+  "ridge_cap_lf",
+  "ice_water_lf",
+].join(", ");
+
+interface EstimateMeasurementRow {
+  id: string;
+  roof_area_sf?: number | null;
+  roof_squares?: number | null;
+  waste_percent?: number | null;
+  eaves_lf?: number | null;
+  rakes_lf?: number | null;
+  hips_lf?: number | null;
+  ridges_lf?: number | null;
+  valleys_lf?: number | null;
+  flashing_lf?: number | null;
+  step_flashing_lf?: number | null;
+  drip_edge_lf?: number | null;
+  starter_lf?: number | null;
+  ridge_cap_lf?: number | null;
+  ice_water_lf?: number | null;
+}
+
 interface PricingPreviewResult {
   estimate: BuiltEstimate | null;
   errorMessage: string | null;
   missingCatalogItems: MissingCatalogItems | null;
+  measurementSource: string;
 }
 
-async function loadSampleEstimate(): Promise<PricingPreviewResult> {
-  const [pricingResult, laborResult] = await Promise.all([
+function firstSearchParamValue(
+  value: string | string[] | undefined
+): string | null {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  const text = rawValue?.trim();
+
+  return text || null;
+}
+
+function isFiniteMeasurement(value: number | null | undefined): boolean {
+  return Number.isFinite(value);
+}
+
+function estimateMeasurementsFromRow(
+  row: EstimateMeasurementRow
+): EstimateMeasurements {
+  return {
+    roofAreaSf: row.roof_area_sf ?? null,
+    roofSquares: row.roof_squares ?? null,
+    wastePercent: row.waste_percent ?? null,
+    eavesLf: row.eaves_lf ?? null,
+    rakesLf: row.rakes_lf ?? null,
+    hipsLf: row.hips_lf ?? null,
+    ridgesLf: row.ridges_lf ?? null,
+    valleysLf: row.valleys_lf ?? null,
+    flashingLf: row.flashing_lf ?? null,
+    stepFlashingLf: row.step_flashing_lf ?? null,
+    dripEdgeLf: row.drip_edge_lf ?? null,
+    starterLf: row.starter_lf ?? null,
+    ridgeCapLf: row.ridge_cap_lf ?? null,
+    iceWaterLf: row.ice_water_lf ?? null,
+  };
+}
+
+function validateEstimateMeasurements(
+  estimateId: string,
+  row: EstimateMeasurementRow
+): void {
+  const hasRoofSize =
+    (isFiniteMeasurement(row.roof_squares) && Number(row.roof_squares) > 0) ||
+    (isFiniteMeasurement(row.roof_area_sf) && Number(row.roof_area_sf) > 0);
+  const requiredFields: Array<[string, number | null | undefined]> = [
+    ["waste_percent", row.waste_percent],
+    ["eaves_lf", row.eaves_lf],
+    ["rakes_lf", row.rakes_lf],
+    ["hips_lf", row.hips_lf],
+    ["ridges_lf", row.ridges_lf],
+    ["ice_water_lf", row.ice_water_lf],
+  ];
+  const missingFields = requiredFields
+    .filter(([, value]) => !isFiniteMeasurement(value))
+    .map(([field]) => field);
+
+  if (!hasRoofSize) {
+    missingFields.unshift("roof_squares or roof_area_sf");
+  }
+
+  if (missingFields.length > 0) {
+    throw new Error(
+      `Estimate ${estimateId} does not have enough measurements for the v2 pricing preview. Missing: ${missingFields.join(
+        ", "
+      )}.`
+    );
+  }
+}
+
+async function loadEstimateMeasurements(
+  estimateId: string
+): Promise<EstimateMeasurements> {
+  const { data, error } = await supabase
+    .from("estimates")
+    .select(estimateMeasurementSelect)
+    .eq("id", estimateId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Could not load estimate ${estimateId}: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error(`Estimate ${estimateId} was not found.`);
+  }
+
+  const row = data as EstimateMeasurementRow;
+  validateEstimateMeasurements(estimateId, row);
+
+  return estimateMeasurementsFromRow(row);
+}
+
+async function loadPricingPreview(
+  estimateId: string | null
+): Promise<PricingPreviewResult> {
+  const [pricingResult, laborResult, estimateMeasurements] = await Promise.all([
     supabase.from("pricing_items").select("*").eq("active", true),
     supabase.from("labor_items").select("*").eq("active", true),
+    estimateId ? loadEstimateMeasurements(estimateId) : sampleMeasurements,
   ]);
 
   if (pricingResult.error) {
@@ -76,19 +206,21 @@ async function loadSampleEstimate(): Promise<PricingPreviewResult> {
       errorMessage:
         "The active Supabase catalog is missing items required by the v2 templates.",
       missingCatalogItems,
+      measurementSource: estimateId ? "Estimate" : "Sample",
     };
   }
 
   return {
     estimate: buildEstimate({
-      estimateId: "preview-estimate",
+      estimateId: estimateId ?? "preview-estimate",
       targetMarginPercent,
-      measurements: sampleMeasurements,
+      measurements: estimateMeasurements,
       pricingItems,
       laborItems,
     }),
     errorMessage: null,
     missingCatalogItems: null,
+    measurementSource: estimateId ? "Estimate" : "Sample",
   };
 }
 
@@ -122,10 +254,15 @@ function expectedPriceFromMargin(cost: number): number {
   return roundCurrency(cost / (1 - targetMarginDecimal));
 }
 
-export default async function PricingV2PreviewPage() {
+export default async function PricingV2PreviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ estimateId?: string | string[] }>;
+}) {
   await connection();
 
-  const result: PricingPreviewResult = await loadSampleEstimate().catch(
+  const estimateId = firstSearchParamValue((await searchParams).estimateId);
+  const result: PricingPreviewResult = await loadPricingPreview(estimateId).catch(
     (error: unknown) => ({
       estimate: null,
       errorMessage:
@@ -133,6 +270,7 @@ export default async function PricingV2PreviewPage() {
           ? error.message
           : "Could not load the v2 pricing preview.",
       missingCatalogItems: null,
+      measurementSource: estimateId ? "Estimate" : "Sample",
     })
   );
 
@@ -152,6 +290,11 @@ export default async function PricingV2PreviewPage() {
           <h1 className="mt-1 text-3xl font-black text-slate-950">
             Estimate Option Preview
           </h1>
+          <p className="mt-2 max-w-3xl break-words text-sm text-slate-600">
+            {estimateId
+              ? `Using measurements from estimate ${estimateId}.`
+              : "Using sample measurements. Add ?estimateId=UUID to preview a saved estimate."}
+          </p>
         </div>
 
         {result.errorMessage || !sampleEstimate || !firstOption ? (
@@ -169,7 +312,8 @@ export default async function PricingV2PreviewPage() {
           </section>
         ) : (
           <>
-            <section className="mb-6 grid gap-4 md:grid-cols-5">
+            <section className="mb-6 grid gap-4 md:grid-cols-6">
+              <Metric label="Measurements" value={result.measurementSource} />
               <Metric
                 label="Roof squares"
                 value={number(sampleEstimate.measurements.roofSquares)}
@@ -182,7 +326,7 @@ export default async function PricingV2PreviewPage() {
                 label="Waste"
                 value={`${number(sampleEstimate.measurements.wastePercent)}%`}
               />
-              <Metric label="Target margin" value="45%" />
+              <Metric label="Target margin" value={`${targetMarginPercent}%`} />
               <Metric
                 label="Options"
                 value={String(sampleEstimate.options.length)}
