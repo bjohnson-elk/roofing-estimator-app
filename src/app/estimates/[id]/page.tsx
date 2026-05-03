@@ -524,6 +524,13 @@ export default function EstimateDetailPage() {
                     </Link>
 
                     <Link
+                      href={`/pricing-v2?estimateId=${estimate.id}`}
+                      className="block rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-center text-xs font-bold text-blue-700 hover:bg-blue-100"
+                    >
+                      V2 Pricing Preview
+                    </Link>
+
+                    <Link
                       href={`/estimates/${estimate.id}/proposal`}
                       className="block rounded-md border border-slate-300 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700 hover:bg-slate-50"
                     >
