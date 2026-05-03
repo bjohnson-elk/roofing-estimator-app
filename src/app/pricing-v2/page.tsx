@@ -1,5 +1,11 @@
 import AppSidebar from "@/components/AppSidebar";
-import { buildEstimate } from "@/lib/pricing";
+import {
+  buildEstimate,
+  findMissingCatalogItems,
+  hasMissingCatalogItems,
+  type BuiltEstimate,
+  type MissingCatalogItems,
+} from "@/lib/pricing";
 import {
   laborItemsFromSupabaseRows,
   pricingItemsFromSupabaseRows,
@@ -21,7 +27,13 @@ const sampleMeasurements = {
   iceWaterLf: 164,
 };
 
-async function loadSampleEstimate() {
+interface PricingPreviewResult {
+  estimate: BuiltEstimate | null;
+  errorMessage: string | null;
+  missingCatalogItems: MissingCatalogItems | null;
+}
+
+async function loadSampleEstimate(): Promise<PricingPreviewResult> {
   const [pricingResult, laborResult] = await Promise.all([
     supabase.from("pricing_items").select("*").eq("active", true),
     supabase.from("labor_items").select("*").eq("active", true),
@@ -50,13 +62,31 @@ async function loadSampleEstimate() {
     throw new Error("No active labor items were found.");
   }
 
-  return buildEstimate({
-    estimateId: "preview-estimate",
-    targetMarginPercent,
-    measurements: sampleMeasurements,
+  const missingCatalogItems = findMissingCatalogItems({
     pricingItems,
     laborItems,
   });
+
+  if (hasMissingCatalogItems(missingCatalogItems)) {
+    return {
+      estimate: null,
+      errorMessage:
+        "The active Supabase catalog is missing items required by the v2 templates.",
+      missingCatalogItems,
+    };
+  }
+
+  return {
+    estimate: buildEstimate({
+      estimateId: "preview-estimate",
+      targetMarginPercent,
+      measurements: sampleMeasurements,
+      pricingItems,
+      laborItems,
+    }),
+    errorMessage: null,
+    missingCatalogItems: null,
+  };
 }
 
 function money(value: number) {
@@ -76,15 +106,16 @@ function number(value: number) {
 export default async function PricingV2PreviewPage() {
   await connection();
 
-  const result = await loadSampleEstimate()
-    .then((estimate) => ({ estimate, errorMessage: null }))
-    .catch((error: unknown) => ({
+  const result: PricingPreviewResult = await loadSampleEstimate().catch(
+    (error: unknown) => ({
       estimate: null,
       errorMessage:
         error instanceof Error
           ? error.message
           : "Could not load the v2 pricing preview.",
-    }));
+      missingCatalogItems: null,
+    })
+  );
 
   const sampleEstimate = result.estimate;
   const firstOption = sampleEstimate?.options[0] ?? null;
@@ -112,115 +143,161 @@ export default async function PricingV2PreviewPage() {
               {result.errorMessage ??
                 "The active pricing data did not produce a preview option."}
             </p>
+            {result.missingCatalogItems ? (
+              <MissingCatalogChecklist missing={result.missingCatalogItems} />
+            ) : null}
           </section>
         ) : (
           <>
+            <section className="mb-6 grid gap-4 md:grid-cols-5">
+              <Metric
+                label="Roof squares"
+                value={number(sampleEstimate.measurements.roofSquares)}
+              />
+              <Metric
+                label="Waste squares"
+                value={number(sampleEstimate.measurements.wasteSquares)}
+              />
+              <Metric
+                label="Waste"
+                value={`${number(sampleEstimate.measurements.wastePercent)}%`}
+              />
+              <Metric label="Target margin" value="45%" />
+              <Metric
+                label="Options"
+                value={String(sampleEstimate.options.length)}
+              />
+            </section>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-5">
-          <Metric
-            label="Roof squares"
-            value={number(sampleEstimate.measurements.roofSquares)}
-          />
-          <Metric
-            label="Waste squares"
-            value={number(sampleEstimate.measurements.wasteSquares)}
-          />
-          <Metric
-            label="Waste"
-            value={`${number(sampleEstimate.measurements.wastePercent)}%`}
-          />
-          <Metric label="Target margin" value="45%" />
-          <Metric label="Options" value={String(sampleEstimate.options.length)} />
-        </section>
-
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-slate-950 text-white">
-              <tr>
-                <th className="px-4 py-3">Option</th>
-                <th className="px-4 py-3 text-right">Cost</th>
-                <th className="px-4 py-3 text-right">Price</th>
-                <th className="px-4 py-3 text-right">Gross Profit</th>
-                <th className="px-4 py-3 text-right">Margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sampleEstimate.options.map((option) => (
-                <tr key={option.templateKey} className="border-t border-slate-100">
-                  <td className="px-4 py-3 font-bold text-slate-950">
-                    {option.optionName}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-700">
-                    {money(option.subtotalCost)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-black text-slate-950">
-                    {money(option.subtotalPrice)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-700">
-                    {money(option.grossProfit)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-700">
-                    {number(option.grossMarginPercent)}%
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="mt-8">
-          <h2 className="mb-3 text-xl font-black text-slate-950">
-            {firstOption.optionName} Line Items
-          </h2>
-
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Line</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3 text-right">Measured</th>
-                  <th className="px-4 py-3 text-right">Order Qty</th>
-                  <th className="px-4 py-3">Unit</th>
-                  <th className="px-4 py-3 text-right">Cost</th>
-                  <th className="px-4 py-3 text-right">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {firstOption.lineItems.map((line) => (
-                  <tr
-                    key={`${line.sourceType}-${line.description}`}
-                    className="border-t border-slate-100"
-                  >
-                    <td className="px-4 py-3 font-semibold text-slate-950">
-                      {line.description}
-                    </td>
-                    <td className="px-4 py-3 capitalize text-slate-600">
-                      {line.sourceType}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-700">
-                      {number(line.measuredQuantity)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-bold text-slate-950">
-                      {number(line.orderQuantity)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{line.unit}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">
-                      {money(line.totalCost)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-bold text-slate-950">
-                      {money(line.totalPrice)}
-                    </td>
+            <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead className="bg-slate-950 text-white">
+                  <tr>
+                    <th className="px-4 py-3">Option</th>
+                    <th className="px-4 py-3 text-right">Cost</th>
+                    <th className="px-4 py-3 text-right">Price</th>
+                    <th className="px-4 py-3 text-right">Gross Profit</th>
+                    <th className="px-4 py-3 text-right">Margin</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {sampleEstimate.options.map((option) => (
+                    <tr
+                      key={option.templateKey}
+                      className="border-t border-slate-100"
+                    >
+                      <td className="px-4 py-3 font-bold text-slate-950">
+                        {option.optionName}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {money(option.subtotalCost)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-black text-slate-950">
+                        {money(option.subtotalPrice)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {money(option.grossProfit)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {number(option.grossMarginPercent)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="mt-8">
+              <h2 className="mb-3 text-xl font-black text-slate-950">
+                {firstOption.optionName} Line Items
+              </h2>
+
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Line</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3 text-right">Measured</th>
+                      <th className="px-4 py-3 text-right">Order Qty</th>
+                      <th className="px-4 py-3">Unit</th>
+                      <th className="px-4 py-3 text-right">Cost</th>
+                      <th className="px-4 py-3 text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {firstOption.lineItems.map((line) => (
+                      <tr
+                        key={`${line.sourceType}-${line.description}`}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-4 py-3 font-semibold text-slate-950">
+                          {line.description}
+                        </td>
+                        <td className="px-4 py-3 capitalize text-slate-600">
+                          {line.sourceType}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-700">
+                          {number(line.measuredQuantity)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-slate-950">
+                          {number(line.orderQuantity)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {line.unit}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-700">
+                          {money(line.totalCost)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-slate-950">
+                          {money(line.totalPrice)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </>
         )}
       </div>
     </main>
+  );
+}
+
+function MissingCatalogChecklist({ missing }: { missing: MissingCatalogItems }) {
+  return (
+    <div className="mt-5 grid gap-5 md:grid-cols-2">
+      {missing.materials.length > 0 ? (
+        <div>
+          <h3 className="text-sm font-black uppercase tracking-wide text-slate-700">
+            Missing material catalog items
+          </h3>
+          <ul className="mt-2 space-y-2 text-sm text-slate-700">
+            {missing.materials.map((item) => (
+              <li key={`${item.category}-${item.productName}`}>
+                <span className="font-bold text-slate-950">{item.category}</span>
+                {": "}
+                {item.productName}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {missing.laborItems.length > 0 ? (
+        <div>
+          <h3 className="text-sm font-black uppercase tracking-wide text-slate-700">
+            Missing labor catalog items
+          </h3>
+          <ul className="mt-2 space-y-2 text-sm text-slate-700">
+            {missing.laborItems.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
