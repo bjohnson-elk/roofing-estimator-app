@@ -1,0 +1,570 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+type Estimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  sales_rep: string | null;
+  status: string | null;
+  subtotal_price: number | null;
+  created_at: string | null;
+};
+
+const pipelineStatuses = [
+  {
+    label: "Pending Measurements",
+    status: "Draft - Pending Measurements",
+    icon: "📏",
+    color: "border-b-amber-400",
+    iconBg: "bg-amber-100",
+  },
+  {
+    label: "Pending Information",
+    status: "Draft - Pending Information",
+    icon: "📋",
+    color: "border-b-orange-400",
+    iconBg: "bg-orange-100",
+  },
+  {
+    label: "Proposal Created",
+    status: "Proposal Created",
+    icon: "📄",
+    color: "border-b-blue-500",
+    iconBg: "bg-blue-100",
+  },
+  {
+    label: "Proposal Sent",
+    status: "Proposal Sent",
+    icon: "✈️",
+    color: "border-b-violet-500",
+    iconBg: "bg-violet-100",
+  },
+  {
+    label: "Proposal Signed",
+    status: "Proposal Signed",
+    icon: "✅",
+    color: "border-b-green-500",
+    iconBg: "bg-green-100",
+  },
+  {
+    label: "Orders Created",
+    status: "Orders Created",
+    icon: "📦",
+    color: "border-b-cyan-500",
+    iconBg: "bg-cyan-100",
+  },
+  {
+    label: "Orders Sent",
+    status: "Orders Sent",
+    icon: "🚚",
+    color: "border-b-blue-600",
+    iconBg: "bg-blue-100",
+  },
+  {
+    label: "Lost / Declined",
+    status: "Lost",
+    icon: "✕",
+    color: "border-b-slate-400",
+    iconBg: "bg-slate-100",
+  },
+  {
+    label: "Archived",
+    status: "Archived",
+    icon: "🗄️",
+    color: "border-b-slate-900",
+    iconBg: "bg-slate-200",
+  },
+];
+
+function formatMoney(value: number | null) {
+  if (!value) return "Not Priced";
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "No date";
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getStatusBadge(status: string | null) {
+  const base =
+    "inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold whitespace-nowrap";
+
+  switch (status) {
+    case "Draft - Pending Measurements":
+      return `${base} bg-amber-100 text-amber-700`;
+    case "Draft - Pending Information":
+      return `${base} bg-orange-100 text-orange-700`;
+    case "Proposal Created":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Proposal Sent":
+      return `${base} bg-violet-100 text-violet-700`;
+    case "Proposal Signed":
+      return `${base} bg-green-100 text-green-700`;
+    case "Orders Created":
+      return `${base} bg-cyan-100 text-cyan-700`;
+    case "Orders Sent":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Lost":
+      return `${base} bg-slate-200 text-slate-700`;
+    case "Archived":
+      return `${base} bg-slate-900 text-white`;
+    default:
+      return `${base} bg-slate-100 text-slate-600`;
+  }
+}
+
+export default function DashboardPage() {
+  const [estimates, setEstimates] = useState<Estimate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [searchText, setSearchText] = useState("");
+
+  useEffect(() => {
+    async function loadEstimates() {
+      const { data, error } = await supabase
+        .from("estimates")
+        .select(
+          "id, customer_name, property_address, sales_rep, status, subtotal_price, created_at"
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        setEstimates((data ?? []) as Estimate[]);
+      }
+
+      setLoading(false);
+    }
+
+    loadEstimates();
+  }, []);
+
+  const activeEstimates = estimates.filter(
+    (estimate) => estimate.status !== "Archived" && estimate.status !== "Lost"
+  );
+
+  const totalPipelineValue = activeEstimates.reduce(
+    (sum, estimate) => sum + (estimate.subtotal_price || 0),
+    0
+  );
+
+  const missingMeasurements = estimates.filter(
+    (estimate) => estimate.status === "Draft - Pending Measurements"
+  ).length;
+
+  const proposalsNotSent = estimates.filter(
+    (estimate) => estimate.status === "Proposal Created"
+  ).length;
+
+  const signedNeedOrders = estimates.filter(
+    (estimate) => estimate.status === "Proposal Signed"
+  ).length;
+
+  const recentEstimates = activeEstimates.slice(0, 6);
+
+  const searchResults =
+    searchText.trim().length === 0
+      ? []
+      : estimates
+          .filter((estimate) =>
+            `${estimate.customer_name ?? ""} ${estimate.property_address ?? ""} ${
+              estimate.sales_rep ?? ""
+            } ${estimate.status ?? ""}`
+              .toLowerCase()
+              .includes(searchText.toLowerCase())
+          )
+          .slice(0, 7);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          Loading dashboard...
+        </div>
+      </main>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          <h1 className="text-2xl font-bold text-red-600">
+            Dashboard connection error
+          </h1>
+          <p className="mt-4 text-slate-700">{errorMessage}</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Dashboard" />
+
+        <section className="min-h-screen flex-1 p-6 lg:ml-[var(--sidebar-width)]">
+          <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-slate-900">Dashboard</h1>
+              <p className="mt-1 text-slate-600">
+                Overview of your estimating pipeline and recent activity
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 md:flex-row">
+              <div className="relative">
+                <input
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  placeholder="Search customer, address, or estimate..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm md:w-[460px]"
+                />
+
+                {searchText.trim().length > 0 && (
+                  <div className="absolute right-0 z-50 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                    {searchResults.length === 0 ? (
+                      <div className="px-4 py-4 text-sm text-slate-500">
+                        No matching estimates found.
+                      </div>
+                    ) : (
+                      searchResults.map((estimate) => (
+                        <Link
+                          key={estimate.id}
+                          href={`/estimates/${estimate.id}`}
+                          className="block border-b border-slate-100 px-4 py-3 hover:bg-slate-50"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-slate-900">
+                                {estimate.customer_name || "Unnamed Customer"}
+                              </div>
+                              <div className="mt-1 line-clamp-2 text-sm text-slate-600">
+                                {estimate.property_address || "No address"}
+                              </div>
+                            </div>
+                            <span className={getStatusBadge(estimate.status)}>
+                              {estimate.status || "No Status"}
+                            </span>
+                          </div>
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <Link
+                href="/estimates/new"
+                className="rounded-lg bg-blue-600 px-5 py-3 text-center text-sm font-bold text-white shadow-sm hover:bg-blue-700"
+              >
+                + Start New Estimate
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="min-w-0">
+              <div className="mb-4 border-t border-slate-300 pt-5">
+                <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                  Pipeline Overview
+                </h2>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+                {pipelineStatuses.map((item) => {
+                  const matching = estimates.filter(
+                    (estimate) => estimate.status === item.status
+                  );
+
+                  const value = matching.reduce(
+                    (sum, estimate) => sum + (estimate.subtotal_price || 0),
+                    0
+                  );
+
+                  return (
+                    <Link
+                      key={item.status}
+                      href={`/estimates?status=${encodeURIComponent(
+                        item.status
+                      )}`}
+                      className={`rounded-xl border border-slate-200 ${item.color} bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div
+                          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${item.iconBg} text-xl`}
+                        >
+                          {item.icon}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900">
+                            {item.label}
+                          </div>
+                          <div className="mt-3 text-3xl font-black text-slate-900">
+                            {matching.length}
+                          </div>
+                          <div className="mt-2 text-base font-bold text-slate-900">
+                            {formatMoney(value)}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Total Value
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                  <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                    Recent Active Estimates
+                  </h2>
+
+                  <Link
+                    href="/estimates"
+                    className="text-sm font-bold text-blue-600 hover:text-blue-700"
+                  >
+                    View All
+                  </Link>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full table-fixed border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                        <th className="w-[20%] px-5 py-3">Customer</th>
+                        <th className="w-[30%] px-5 py-3">Address</th>
+                        <th className="w-[24%] px-5 py-3">Status</th>
+                        <th className="w-[12%] px-5 py-3">Total</th>
+                        <th className="w-[14%] px-5 py-3 text-right">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {recentEstimates.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-5 py-8 text-center text-slate-500"
+                          >
+                            No active estimates yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        recentEstimates.map((estimate) => (
+                          <tr
+                            key={estimate.id}
+                            className="border-b border-slate-100 hover:bg-slate-50"
+                          >
+                            <td className="px-5 py-4 align-middle">
+                              <div className="break-words font-semibold text-slate-900">
+                                {estimate.customer_name || "Unnamed Customer"}
+                              </div>
+                            </td>
+
+                            <td className="px-5 py-4 align-middle">
+                              <div className="break-words text-slate-700">
+                                {estimate.property_address || "No address"}
+                              </div>
+                            </td>
+
+                            <td className="px-5 py-4 align-middle">
+                              <span className={getStatusBadge(estimate.status)}>
+                                {estimate.status || "No Status"}
+                              </span>
+                            </td>
+
+                            <td className="px-5 py-4 align-middle font-semibold text-slate-900">
+                              <span className="whitespace-nowrap">
+                                {formatMoney(estimate.subtotal_price)}
+                              </span>
+                            </td>
+
+                            <td className="px-5 py-4 text-right align-middle">
+                              <Link
+                                href={`/estimates/${estimate.id}`}
+                                className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                              >
+                                Open
+                              </Link>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <aside className="space-y-5">
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-5 py-4">
+                  <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                    At A Glance
+                  </h2>
+                </div>
+
+                <div className="divide-y divide-slate-200">
+                  <Link
+                    href="/estimates"
+                    className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-700">
+                      $
+                    </div>
+                    <div>
+                      <div className="text-sm text-slate-500">
+                        Active Pipeline Value
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        {formatMoney(totalPipelineValue)}
+                      </div>
+                    </div>
+                  </Link>
+
+                  <Link
+                    href="/estimates"
+                    className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-700">
+                      #
+                    </div>
+                    <div>
+                      <div className="text-sm text-slate-500">
+                        Total Active Estimates
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        {activeEstimates.length}
+                      </div>
+                    </div>
+                  </Link>
+
+                  <div className="flex items-center gap-4 px-5 py-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 font-bold text-slate-700">
+                      ⏱
+                    </div>
+                    <div>
+                      <div className="text-sm text-slate-500">
+                        Average Cycle Time
+                      </div>
+                      <div className="text-xl font-black text-slate-900">
+                        Later
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-5 py-4">
+                  <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                    Attention Needed
+                  </h2>
+                </div>
+
+                <div className="divide-y divide-slate-200">
+                  <Link
+                    href={`/estimates?status=${encodeURIComponent(
+                      "Draft - Pending Measurements"
+                    )}`}
+                    className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50"
+                  >
+                    <span className="font-semibold text-slate-700">
+                      ⚠️ Missing Measurements
+                    </span>
+                    <span className="font-black text-slate-900">
+                      {missingMeasurements}
+                    </span>
+                  </Link>
+
+                  <Link
+                    href={`/estimates?status=${encodeURIComponent(
+                      "Proposal Created"
+                    )}`}
+                    className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50"
+                  >
+                    <span className="font-semibold text-slate-700">
+                      ⚠️ Proposals Not Sent
+                    </span>
+                    <span className="font-black text-slate-900">
+                      {proposalsNotSent}
+                    </span>
+                  </Link>
+
+                  <Link
+                    href={`/estimates?status=${encodeURIComponent(
+                      "Proposal Signed"
+                    )}`}
+                    className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50"
+                  >
+                    <span className="font-semibold text-slate-700">
+                      ⚠️ Signed Proposals Need Orders
+                    </span>
+                    <span className="font-black text-slate-900">
+                      {signedNeedOrders}
+                    </span>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-5 py-4">
+                  <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                    Recent Activity
+                  </h2>
+                </div>
+
+                <div className="divide-y divide-slate-200">
+                  {recentEstimates.slice(0, 4).length === 0 ? (
+                    <div className="px-5 py-4 text-sm text-slate-500">
+                      No recent active estimates.
+                    </div>
+                  ) : (
+                    recentEstimates.slice(0, 4).map((estimate) => (
+                      <Link
+                        key={estimate.id}
+                        href={`/estimates/${estimate.id}`}
+                        className="block px-5 py-4 hover:bg-slate-50"
+                      >
+                        <div className="text-sm font-semibold text-slate-800">
+                          Estimate created for{" "}
+                          {estimate.customer_name || "Unnamed Customer"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatDate(estimate.created_at)}
+                        </div>
+                      </Link>
+                    ))
+                  )}
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}

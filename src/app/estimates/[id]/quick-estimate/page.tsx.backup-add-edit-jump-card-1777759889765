@@ -1,0 +1,371 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type Estimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  customer_phone: string | null;
+  customer_email: string | null;
+  sales_rep: string | null;
+  status: string | null;
+  payment_type: string | null;
+
+  quick_estimate: boolean | null;
+  quick_estimate_squares: number | null;
+  quick_estimate_pitch: string | null;
+  quick_estimate_stories: string | null;
+  quick_estimate_layers: number | null;
+  quick_estimate_level: string | null;
+  quick_estimate_shingle_type: string | null;
+  quick_estimate_redeck: boolean | null;
+  quick_estimate_shake_layer: boolean | null;
+
+  quick_estimate_low_price: number | null;
+  quick_estimate_high_price: number | null;
+  quick_estimate_cash_low_price: number | null;
+  quick_estimate_cash_high_price: number | null;
+  quick_estimate_finance_product: string | null;
+  quick_estimate_dealer_fee_percent: number | null;
+  quick_estimate_dealer_fee_low_amount: number | null;
+  quick_estimate_dealer_fee_high_amount: number | null;
+  quick_estimate_disclaimer: string | null;
+};
+
+const financeProducts: Record<string, string> = {
+  "3122005": "12mo Deferred Interest / 20.99% APR / 5.24% fee",
+  "1000605": "6.99% APR / 60mo / 7.49% fee",
+  "1000615": "6.99% APR / 180mo / 14.99% fee",
+  "1000905": "9.99% APR / 60mo / 2.49% fee",
+  "1000915": "9.99% APR / 180mo / 5.99% fee",
+};
+
+function formatMoney(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "$0";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatYesNo(value: boolean | null) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "Not entered";
+}
+
+function DetailBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number | null | undefined;
+}) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black text-slate-900">
+        {value === null || value === undefined || value === "" ? "Not entered" : value}
+      </div>
+    </div>
+  );
+}
+
+export default function QuickEstimateResultPage() {
+  const router = useRouter();
+  const params = useParams();
+
+  const estimateId =
+    typeof params.id === "string" ? params.id : params.id?.[0] ?? "";
+
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    async function loadEstimate() {
+      if (!estimateId) return;
+
+      const { data, error } = await supabase
+        .from("estimates")
+        .select(
+          [
+            "id",
+            "customer_name",
+            "property_address",
+            "customer_phone",
+            "customer_email",
+            "sales_rep",
+            "status",
+            "payment_type",
+            "quick_estimate",
+            "quick_estimate_squares",
+            "quick_estimate_pitch",
+            "quick_estimate_stories",
+            "quick_estimate_layers",
+            "quick_estimate_level",
+            "quick_estimate_shingle_type",
+            "quick_estimate_redeck",
+            "quick_estimate_shake_layer",
+            "quick_estimate_low_price",
+            "quick_estimate_high_price",
+            "quick_estimate_cash_low_price",
+            "quick_estimate_cash_high_price",
+            "quick_estimate_finance_product",
+            "quick_estimate_dealer_fee_percent",
+            "quick_estimate_dealer_fee_low_amount",
+            "quick_estimate_dealer_fee_high_amount",
+            "quick_estimate_disclaimer",
+          ].join(", ")
+        )
+        .eq("id", estimateId)
+        .single();
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        setEstimate(data as Estimate);
+      }
+
+      setLoading(false);
+    }
+
+    loadEstimate();
+  }, [estimateId]);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="rounded-lg bg-white p-4 text-sm font-semibold shadow">
+          Loading quick estimate...
+        </div>
+      </main>
+    );
+  }
+
+  if (errorMessage || !estimate) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="rounded-lg bg-white p-5 shadow">
+          <h1 className="text-xl font-black text-red-600">
+            Quick estimate not found
+          </h1>
+          {errorMessage && (
+            <p className="mt-2 text-sm font-semibold text-slate-700">
+              {errorMessage}
+            </p>
+          )}
+          <button
+            onClick={() => router.push("/")}
+            className="mt-5 rounded-md bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-700"
+          >
+            Back to Start
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  const isFinance = estimate.payment_type === "Finance";
+  const financeLabel = estimate.quick_estimate_finance_product
+    ? financeProducts[estimate.quick_estimate_finance_product] ||
+      estimate.quick_estimate_finance_product
+    : "Not selected";
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Estimates" />
+
+        <section className="min-h-screen min-w-0 flex-1 p-5 lg:ml-[var(--sidebar-width)]">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-5 border-b border-slate-300 pb-5">
+              <button
+                onClick={() => router.push("/")}
+                className="mb-2 text-xs font-bold text-slate-500 hover:text-slate-900"
+              >
+                ← Back to Start
+              </button>
+
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0">
+                  <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                    Quick Estimate
+                  </div>
+                  <h1 className="mt-2 text-3xl font-black text-slate-950">
+                    {estimate.customer_name || "Unnamed Customer"}
+                  </h1>
+                  <p className="mt-1 max-w-4xl text-sm font-medium text-slate-600">
+                    {estimate.property_address || "No address"}
+                  </p>
+                </div>
+
+                <Link
+                  href={`/estimates/${estimate.id}`}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-black text-slate-800 shadow-sm hover:bg-slate-50"
+                >
+                  Open Estimate File
+                </Link>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="min-w-0 space-y-4">
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm">
+                  <div className="text-[10px] font-black uppercase tracking-wide text-blue-700">
+                    {isFinance ? "Customer Finance Price Range" : "Customer Price Range"}
+                  </div>
+
+                  <div className="mt-2 text-4xl font-black text-slate-950">
+                    {formatMoney(estimate.quick_estimate_low_price)} -{" "}
+                    {formatMoney(estimate.quick_estimate_high_price)}
+                  </div>
+
+                  <p className="mt-3 max-w-3xl text-sm font-semibold text-slate-700">
+                    {estimate.quick_estimate_disclaimer ||
+                      "This is a quick estimate range only. Actual measurements may change the price."}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Quick Estimate Inputs
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-3 p-4 md:grid-cols-4">
+                    <DetailBox
+                      label="# of SQ"
+                      value={estimate.quick_estimate_squares}
+                    />
+                    <DetailBox
+                      label="Pitch"
+                      value={estimate.quick_estimate_pitch}
+                    />
+                    <DetailBox
+                      label="Stories"
+                      value={estimate.quick_estimate_stories}
+                    />
+                    <DetailBox
+                      label="Layers"
+                      value={estimate.quick_estimate_layers}
+                    />
+                    <DetailBox
+                      label="Shake Layer"
+                      value={formatYesNo(estimate.quick_estimate_shake_layer)}
+                    />
+                    <DetailBox
+                      label="Redeck"
+                      value={formatYesNo(estimate.quick_estimate_redeck)}
+                    />
+                    <DetailBox
+                      label="Payment"
+                      value={estimate.payment_type}
+                    />
+                    <DetailBox
+                      label="Shingle"
+                      value={
+                        estimate.quick_estimate_shingle_type ||
+                        estimate.quick_estimate_level
+                      }
+                    />
+                  </div>
+                </div>
+
+                {isFinance && (
+                  <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <div className="border-b border-slate-200 px-4 py-3">
+                      <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                        Internal Finance Breakdown
+                      </h2>
+                    </div>
+
+                    <div className="grid gap-3 p-4 md:grid-cols-2">
+                      <DetailBox label="Finance Product" value={financeLabel} />
+                      <DetailBox
+                        label="Dealer Fee"
+                        value={`${estimate.quick_estimate_dealer_fee_percent ?? 0}%`}
+                      />
+                      <DetailBox
+                        label="Cash Base Range"
+                        value={`${formatMoney(
+                          estimate.quick_estimate_cash_low_price
+                        )} - ${formatMoney(
+                          estimate.quick_estimate_cash_high_price
+                        )}`}
+                      />
+                      <DetailBox
+                        label="Dealer Fee Range"
+                        value={`${formatMoney(
+                          estimate.quick_estimate_dealer_fee_low_amount
+                        )} - ${formatMoney(
+                          estimate.quick_estimate_dealer_fee_high_amount
+                        )}`}
+                      />
+                    </div>
+
+                    <div className="border-t border-slate-200 px-4 py-3 text-xs font-semibold text-slate-500">
+                      Dealer fee is passed through on top of the cash price and is not marked up. Customer sees the total finance price only.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <aside className="space-y-4">
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Next Step
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <Link
+                      href={`/estimates/${estimate.id}/edit`}
+                      className="block rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-black text-slate-800 hover:bg-slate-50"
+                    >
+                      Review / Edit Info
+                    </Link>
+
+                    <Link
+                      href={`/estimates/${estimate.id}`}
+                      className="block rounded-lg bg-blue-600 px-4 py-2.5 text-center text-sm font-black text-white hover:bg-blue-700"
+                    >
+                      Open Estimate File
+                    </Link>
+
+                    <Link
+                      href={`/estimates/${estimate.id}/measurements`}
+                      className="block rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-black text-slate-800 hover:bg-slate-50"
+                    >
+                      Convert to Full Estimate
+                    </Link>
+
+                    <Link
+                      href="/estimates/new"
+                      className="block rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-black text-slate-800 hover:bg-slate-50"
+                    >
+                      Create Another
+                    </Link>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}

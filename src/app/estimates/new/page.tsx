@@ -1,0 +1,1094 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type DuplicateEstimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  status: string | null;
+  created_at: string | null;
+};
+
+type EstimateMode = "full" | "quick";
+
+const pitchOptions = Array.from({ length: 25 }, (_, index) => `${index}/12`);
+const storyOptions = ["One Story", "Two Story", "Three Story"];
+const quickShingleOptions = ["NS", "HDZ", "UHDZ"];
+const yesNoOptions = ["Yes", "No"];
+const quickPaymentOptions = ["Cash", "Finance"];
+
+const quickFinanceProducts = [
+  {
+    value: "3122005",
+    label: "12mo Deferred Interest / 20.99% APR / 5.24% fee",
+    dealerFeePercent: 5.24,
+  },
+  {
+    value: "1000605",
+    label: "6.99% APR / 60mo / 7.49% fee",
+    dealerFeePercent: 7.49,
+  },
+  {
+    value: "1000615",
+    label: "6.99% APR / 180mo / 14.99% fee",
+    dealerFeePercent: 14.99,
+  },
+  {
+    value: "1000905",
+    label: "9.99% APR / 60mo / 2.49% fee",
+    dealerFeePercent: 2.49,
+  },
+  {
+    value: "1000915",
+    label: "9.99% APR / 180mo / 5.99% fee",
+    dealerFeePercent: 5.99,
+  },
+];
+
+function getFinanceProduct(value: string) {
+  return quickFinanceProducts.find((product) => product.value === value) ?? null;
+}
+
+const quickEstimateDisclaimer =
+  "This is a quick estimate range only. Actual roof measurements, material selections, access conditions, waste, and final scope may increase or decrease the price. This range is not guaranteed without verified measurements.";
+
+function formatMoney(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "$0";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function StepPill({
+  label,
+  active = false,
+}: {
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-1.5 text-[11px] font-black uppercase tracking-wide ${
+        active
+          ? "border-blue-200 bg-blue-50 text-blue-700"
+          : "border-slate-200 bg-white text-slate-400"
+      }`}
+    >
+      {label}
+    </div>
+  );
+}
+
+function toNumber(value: string) {
+  if (value.trim() === "") return null;
+  const numberValue = Number(value);
+  return Number.isNaN(numberValue) ? null : numberValue;
+}
+
+function parsePitchNumber(pitch: string) {
+  const raw = pitch.split("/")[0];
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getQuickRange({
+  squares,
+  pitch,
+  stories,
+  layers,
+  shingleType,
+  redeck,
+  shakeLayer,
+  paymentType,
+  financeProduct,
+}: {
+  squares: string;
+  pitch: string;
+  stories: string;
+  layers: string;
+  shingleType: string;
+  redeck: string;
+  shakeLayer: string;
+  paymentType: string;
+  financeProduct: string;
+}) {
+  const squareCount = Number(squares);
+  const layerCount = Number(layers);
+
+  if (
+    Number.isNaN(squareCount) ||
+    squareCount <= 0 ||
+    !pitch ||
+    !stories ||
+    Number.isNaN(layerCount) ||
+    layerCount < 0 ||
+    !Number.isInteger(layerCount) ||
+    !shingleType ||
+    !redeck ||
+    !shakeLayer ||
+    !paymentType
+  ) {
+    return null;
+  }
+
+  if (paymentType === "Finance" && !financeProduct) {
+    return null;
+  }
+
+  const baseRates: Record<string, number> = {
+    NS: 500,
+    HDZ: 575,
+    UHDZ: 675,
+  };
+
+  const pitchNumber = parsePitchNumber(pitch);
+
+  let pitchMultiplier = 1;
+
+  if (pitchNumber >= 13) {
+    pitchMultiplier = 1.3;
+  } else if (pitchNumber >= 11) {
+    pitchMultiplier = 1.18;
+  } else if (pitchNumber >= 9) {
+    pitchMultiplier = 1.1;
+  } else if (pitchNumber >= 7) {
+    pitchMultiplier = 1.05;
+  }
+
+  const storyMultiplier =
+    stories === "Three Story" ? 1.1 : stories === "Two Story" ? 1.05 : 1;
+
+  const layerMultiplier = 1 + Math.max(layerCount - 1, 0) * 0.07;
+
+  const redeckAdder = redeck === "Yes" ? 175 : 0;
+  const shakeLayerAdder = shakeLayer === "Yes" ? 75 : 0;
+
+  const rate =
+    (baseRates[shingleType] ?? baseRates.NS) + redeckAdder + shakeLayerAdder;
+
+  const cashMidpoint =
+    squareCount * rate * pitchMultiplier * storyMultiplier * layerMultiplier;
+
+  const cashLow = Math.round(cashMidpoint * 0.9);
+  const cashHigh = Math.round(cashMidpoint * 1.15);
+  const cashRoundedMidpoint = Math.round(cashMidpoint);
+
+  const selectedFinanceProduct = getFinanceProduct(financeProduct);
+  const dealerFeePercent =
+    paymentType === "Finance" ? selectedFinanceProduct?.dealerFeePercent ?? 0 : 0;
+
+  const dealerFeeMultiplier = dealerFeePercent / 100;
+
+  const dealerFeeLow = Math.round(cashLow * dealerFeeMultiplier);
+  const dealerFeeHigh = Math.round(cashHigh * dealerFeeMultiplier);
+  const dealerFeeMidpoint = Math.round(cashRoundedMidpoint * dealerFeeMultiplier);
+
+  return {
+    low: cashLow + dealerFeeLow,
+    high: cashHigh + dealerFeeHigh,
+    midpoint: cashRoundedMidpoint + dealerFeeMidpoint,
+
+    cashLow,
+    cashHigh,
+    cashMidpoint: cashRoundedMidpoint,
+
+    dealerFeePercent,
+    dealerFeeLow,
+    dealerFeeHigh,
+    dealerFeeMidpoint,
+  };
+}
+
+export default function NewEstimatePage() {
+  const router = useRouter();
+
+  const [mode, setMode] = useState<EstimateMode>("full");
+
+  const [customerName, setCustomerName] = useState("");
+  const [propertyAddress, setPropertyAddress] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [salesRep, setSalesRep] = useState("");
+
+  const [jobType, setJobType] = useState("Insurance");
+  const [hasMeasurements, setHasMeasurements] = useState("");
+
+  const [quickSquares, setQuickSquares] = useState("");
+  const [quickPitch, setQuickPitch] = useState("");
+  const [quickStories, setQuickStories] = useState("");
+  const [quickLayers, setQuickLayers] = useState("");
+  const [quickLevel, setQuickLevel] = useState("HDZ");
+  const [quickRedeck, setQuickRedeck] = useState("");
+  const [quickShakeLayer, setQuickShakeLayer] = useState("");
+  const [quickPaymentType, setQuickPaymentType] = useState("");
+  const [quickFinanceProduct, setQuickFinanceProduct] = useState("");
+  const [quickCreatedId, setQuickCreatedId] = useState("");
+
+  const [duplicates, setDuplicates] = useState<DuplicateEstimate[]>([]);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const quickRange = useMemo(() => {
+    return getQuickRange({
+      squares: quickSquares,
+      pitch: quickPitch,
+      stories: quickStories,
+      layers: quickLayers,
+      shingleType: quickLevel,
+      redeck: quickRedeck,
+      shakeLayer: quickShakeLayer,
+      paymentType: quickPaymentType,
+      financeProduct: quickFinanceProduct,
+    });
+  }, [
+    quickSquares,
+    quickPitch,
+    quickStories,
+    quickLayers,
+    quickLevel,
+    quickRedeck,
+    quickShakeLayer,
+    quickPaymentType,
+    quickFinanceProduct,
+  ]);
+
+  async function checkForDuplicates(address: string) {
+    if (!address.trim()) return;
+
+    setCheckingDuplicates(true);
+    setDuplicates([]);
+
+    const { data, error } = await supabase
+      .from("estimates")
+      .select("id, customer_name, property_address, status, created_at")
+      .ilike("property_address", `%${address.trim()}%`)
+      .limit(5);
+
+    if (!error && data) {
+      setDuplicates(data as DuplicateEstimate[]);
+    }
+
+    setCheckingDuplicates(false);
+  }
+
+  function validateSharedFields() {
+    if (!customerName.trim()) {
+      return "Customer name is required.";
+    }
+
+    if (!propertyAddress.trim()) {
+      return "Property address is required.";
+    }
+
+    if (!salesRep.trim()) {
+      return "Sales rep is required.";
+    }
+
+    if (!customerPhone.trim() && !customerEmail.trim()) {
+      return "Customer phone or customer email is required.";
+    }
+
+    return "";
+  }
+
+  function validateQuickEstimate() {
+    const sharedError = validateSharedFields();
+    if (sharedError) return sharedError;
+
+    if (!quickSquares.trim()) {
+      return "Approximate roof squares are required.";
+    }
+
+    const squareCount = Number(quickSquares);
+    if (Number.isNaN(squareCount) || squareCount <= 0) {
+      return "Approximate roof squares must be greater than 0.";
+    }
+
+    if (!quickPitch) {
+      return "Pitch is required.";
+    }
+
+    if (!quickStories) {
+      return "Stories are required.";
+    }
+
+    if (!quickLayers.trim()) {
+      return "Number of layers is required.";
+    }
+
+    const layerCount = Number(quickLayers);
+    if (Number.isNaN(layerCount) || layerCount < 0 || !Number.isInteger(layerCount)) {
+      return "Number of layers must be a whole number 0 or greater.";
+    }
+
+    if (!quickLevel) {
+      return "Shingle type is required.";
+    }
+
+    if (!quickRedeck) {
+      return "Redeck answer is required.";
+    }
+
+    if (!quickShakeLayer) {
+      return "Shake layer answer is required.";
+    }
+
+    if (!quickPaymentType) {
+      return "Cash or Finance is required.";
+    }
+
+    if (!quickRange) {
+      return "Quick estimate range could not be calculated.";
+    }
+
+    return "";
+  }
+
+  async function createFullEstimate() {
+    setErrorMessage("");
+    setQuickCreatedId("");
+
+    const sharedError = validateSharedFields();
+    if (sharedError) {
+      setErrorMessage(sharedError);
+      return;
+    }
+
+    if (!jobType.trim()) {
+      setErrorMessage("Job type is required.");
+      return;
+    }
+
+    if (!hasMeasurements) {
+      setErrorMessage("Select whether roof measurements are already available.");
+      return;
+    }
+
+    setSaving(true);
+
+    const status =
+      hasMeasurements === "yes"
+        ? "Draft - Pending Information"
+        : "Draft - Pending Measurements";
+
+    const measurementStatus =
+      hasMeasurements === "yes" ? "Ready to Upload" : "Needs Ordered";
+
+    const { data, error } = await supabase
+      .from("estimates")
+      .insert({
+        customer_name: customerName.trim(),
+        property_address: propertyAddress.trim(),
+        customer_phone: customerPhone.trim() || null,
+        customer_email: customerEmail.trim() || null,
+        sales_rep: salesRep.trim(),
+        job_type: jobType,
+        status,
+        measurement_status: measurementStatus,
+        quick_estimate: false,
+      })
+      .select("id")
+      .single();
+
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    if (!data?.id) {
+      setErrorMessage("Estimate was created, but no estimate ID was returned.");
+      return;
+    }
+
+    if (hasMeasurements === "yes") {
+      router.push(`/estimates/${data.id}/measurements`);
+    } else {
+      window.location.href = "https://quickmeasure.gaf.com/guest-home-page";
+    }
+  }
+
+  async function createQuickEstimate() {
+    setErrorMessage("");
+    setQuickCreatedId("");
+
+    const validationError = validateQuickEstimate();
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    if (!quickRange) {
+      setErrorMessage("Quick estimate range could not be calculated.");
+      return;
+    }
+
+    setSaving(true);
+
+    const squareCount = Number(quickSquares);
+    const layerCount = Number(quickLayers);
+
+    const { data, error } = await supabase
+      .from("estimates")
+      .insert({
+        customer_name: customerName.trim(),
+        property_address: propertyAddress.trim(),
+        customer_phone: customerPhone.trim() || null,
+        customer_email: customerEmail.trim() || null,
+        sales_rep: salesRep.trim(),
+
+        job_type: "Quick Estimate",
+        payment_type: quickPaymentType,
+        status: "Draft - Pending Measurements",
+        measurement_status: "Quick Estimate - No Measurements",
+
+        quick_estimate: true,
+        quick_estimate_squares: squareCount,
+        quick_estimate_pitch: quickPitch,
+        quick_estimate_stories: quickStories,
+        quick_estimate_layers: layerCount,
+        quick_estimate_level: quickLevel,
+        quick_estimate_shingle_type: quickLevel,
+        quick_estimate_redeck: quickRedeck === "Yes",
+        quick_estimate_shake_layer: quickShakeLayer === "Yes",
+        quick_estimate_finance_product:
+          quickPaymentType === "Finance" ? quickFinanceProduct : null,
+        quick_estimate_dealer_fee_percent: quickRange.dealerFeePercent,
+        quick_estimate_cash_low_price: quickRange.cashLow,
+        quick_estimate_cash_high_price: quickRange.cashHigh,
+        quick_estimate_dealer_fee_low_amount: quickRange.dealerFeeLow,
+        quick_estimate_dealer_fee_high_amount: quickRange.dealerFeeHigh,
+        quick_estimate_low_price: quickRange.low,
+        quick_estimate_high_price: quickRange.high,
+        quick_estimate_disclaimer: quickEstimateDisclaimer,
+
+        roof_squares: squareCount,
+        roof_area_sf: squareCount * 100,
+        pitch: quickPitch,
+        stories: quickStories,
+        roof_layers: layerCount,
+      })
+      .select("id")
+      .single();
+
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    if (!data?.id) {
+      setErrorMessage("Quick estimate was created, but no estimate ID was returned.");
+      return;
+    }
+
+    router.push(`/estimates/${data.id}/quick-estimate`);
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Estimates" />
+
+        <section className="min-h-screen min-w-0 flex-1 p-5 lg:ml-[var(--sidebar-width)]">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-5 border-b border-slate-300 pb-5">
+              <button
+                onClick={() => router.push("/")}
+                className="mb-2 text-xs font-bold text-slate-500 hover:text-slate-900"
+              >
+                ← Back to Start
+              </button>
+
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                    New Estimate
+                  </div>
+                  <h1 className="mt-2 text-3xl font-black text-slate-950">
+                    Start Estimate
+                  </h1>
+                  <p className="mt-1 text-sm font-medium text-slate-600">
+                    Create a full estimate workflow or generate a quick range without measurements.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <StepPill label="Customer" active />
+                  <StepPill label="Measurements" />
+                  <StepPill label="Questions" />
+                  <StepPill label="Options" />
+                  <StepPill label="Proposal" />
+                  <StepPill label="Orders" />
+                </div>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <div className="mb-5 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">
+                {errorMessage}
+              </div>
+            )}
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="min-w-0 space-y-4">
+                <div className="grid gap-2 md:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("full");
+                      setQuickCreatedId("");
+                      setErrorMessage("");
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-left ${
+                      mode === "full"
+                        ? "border-blue-300 bg-blue-50 text-blue-800"
+                        : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="text-sm font-black">Full Estimate</div>
+                    <div className="mt-0.5 text-[11px] font-medium opacity-80">
+                      Verified measurement workflow.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("quick");
+                      setErrorMessage("");
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-left ${
+                      mode === "quick"
+                        ? "border-blue-300 bg-blue-50 text-blue-800"
+                        : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="text-sm font-black">Quick Estimate</div>
+                    <div className="mt-0.5 text-[11px] font-medium opacity-80">
+                      Range without measurements.
+                    </div>
+                  </button>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Customer Information
+                    </h2>
+                  </div>
+
+                  <div className="space-y-4 p-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <TextField
+                        label="Customer Name"
+                        value={customerName}
+                        onChange={setCustomerName}
+                        placeholder="Example: Brandon Rhoades"
+                        required
+                      />
+
+                      <TextField
+                        label="Sales Rep"
+                        value={salesRep}
+                        onChange={setSalesRep}
+                        placeholder="Sales rep name"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <TextField
+                        label="Property Address"
+                        value={propertyAddress}
+                        onChange={setPropertyAddress}
+                        onBlur={() => checkForDuplicates(propertyAddress)}
+                        placeholder="Example: 949 N 2300 W Lehi, UT 84043"
+                        required
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => checkForDuplicates(propertyAddress)}
+                        className="mt-2 text-xs font-bold text-slate-600 underline hover:text-slate-900"
+                      >
+                        Check duplicate address
+                      </button>
+
+                      {checkingDuplicates && (
+                        <p className="mt-2 text-xs font-semibold text-slate-500">
+                          Checking for duplicates...
+                        </p>
+                      )}
+
+                      {duplicates.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                          <p className="text-xs font-black uppercase tracking-wide text-amber-900">
+                            Possible Duplicate Address
+                          </p>
+
+                          <div className="mt-2 space-y-2">
+                            {duplicates.map((estimate) => (
+                              <div
+                                key={estimate.id}
+                                className="rounded-md bg-white p-3 text-sm"
+                              >
+                                <div className="font-black text-slate-900">
+                                  {estimate.customer_name || "Unnamed Customer"}
+                                </div>
+                                <div className="mt-0.5 text-slate-600">
+                                  {estimate.property_address}
+                                </div>
+                                <div className="mt-1 text-xs font-semibold text-slate-500">
+                                  Status: {estimate.status || "No status"}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    router.push(`/estimates/${estimate.id}`)
+                                  }
+                                  className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700"
+                                >
+                                  Open Existing
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs font-bold text-slate-500">
+                        Customer contact required: enter phone, email, or both.
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <TextField
+                          label="Customer Phone"
+                          value={customerPhone}
+                          onChange={setCustomerPhone}
+                          placeholder="Required if no email"
+                          inputType="tel"
+                        />
+
+                        <TextField
+                          label="Customer Email"
+                          value={customerEmail}
+                          onChange={setCustomerEmail}
+                          placeholder="Required if no phone"
+                          inputType="email"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {mode === "full" ? (
+                  <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <div className="border-b border-slate-200 px-4 py-3">
+                      <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                        Full Estimate Setup
+                      </h2>
+                    </div>
+
+                    <div className="space-y-4 p-4">
+                      <SelectField
+                        label="Job Type"
+                        value={jobType}
+                        onChange={setJobType}
+                        options={["Insurance", "Retail", "Upgrade / Add-on", "Repair"]}
+                        required
+                      />
+
+                      <div>
+                        <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-500">
+                          Roof Measurements *
+                        </label>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => setHasMeasurements("yes")}
+                            className={`rounded-lg border p-3 text-left ${
+                              hasMeasurements === "yes"
+                                ? "border-blue-300 bg-blue-50 text-blue-800"
+                                : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="text-sm font-black">
+                              Measurements Available
+                            </div>
+                            <div className="mt-1 text-xs font-medium opacity-80">
+                              Continue to upload or verify the report.
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHasMeasurements("no")}
+                            className={`rounded-lg border p-3 text-left ${
+                              hasMeasurements === "no"
+                                ? "border-blue-300 bg-blue-50 text-blue-800"
+                                : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="text-sm font-black">
+                              Measurements Needed
+                            </div>
+                            <div className="mt-1 text-xs font-medium opacity-80">
+                              Save the file and order measurements next.
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <div className="border-b border-slate-200 px-4 py-3">
+                      <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                        Quick Estimate Inputs
+                      </h2>
+                    </div>
+
+                    <div className="grid gap-3 p-4 md:grid-cols-2">
+                      <NumberField
+                        label="# of SQ"
+                        value={quickSquares}
+                        onChange={setQuickSquares}
+                        required
+                      />
+
+                      <SelectField
+                        label="Pitch"
+                        value={quickPitch}
+                        onChange={setQuickPitch}
+                        options={pitchOptions}
+                        required
+                      />
+
+                      <SelectField
+                        label="Stories"
+                        value={quickStories}
+                        onChange={setQuickStories}
+                        options={storyOptions}
+                        required
+                      />
+
+                      <IntegerField
+                        label="Layers"
+                        value={quickLayers}
+                        onChange={setQuickLayers}
+                        required
+                      />
+
+                      <SelectField
+                        label="Shake Layer Under Shingles?"
+                        value={quickShakeLayer}
+                        onChange={setQuickShakeLayer}
+                        options={yesNoOptions}
+                        required
+                      />
+
+                      <SelectField
+                        label="Redeck?"
+                        value={quickRedeck}
+                        onChange={setQuickRedeck}
+                        options={yesNoOptions}
+                        required
+                      />
+
+                      <SelectField
+                        label="Cash or Finance"
+                        value={quickPaymentType}
+                        onChange={(value) => {
+                          setQuickPaymentType(value);
+                          if (value !== "Finance") {
+                            setQuickFinanceProduct("");
+                          }
+                        }}
+                        options={quickPaymentOptions}
+                        required
+                      />
+
+                      {quickPaymentType === "Finance" && (
+                        <SelectField
+                          label="Finance Product"
+                          value={quickFinanceProduct}
+                          onChange={setQuickFinanceProduct}
+                          options={quickFinanceProducts.map(
+                            (product) => product.label
+                          )}
+                          optionValues={quickFinanceProducts.map(
+                            (product) => product.value
+                          )}
+                          required
+                        />
+                      )}
+
+                      <SelectField
+                        label="Shingle Type"
+                        value={quickLevel}
+                        onChange={setQuickLevel}
+                        options={quickShingleOptions}
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <aside className="space-y-4">
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Next Step
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    {mode === "full" ? (
+                      <>
+                        <p className="text-sm font-medium text-slate-600">
+                          {hasMeasurements === "no"
+                            ? "This saves the estimate as pending measurements and sends the rep to QuickMeasure."
+                            : "This creates the estimate file and moves the rep directly into the measurement step."}
+                        </p>
+
+                        <button
+                          onClick={createFullEstimate}
+                          disabled={saving}
+                          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {saving
+                            ? "Creating..."
+                            : hasMeasurements === "no"
+                            ? "Save & Open QuickMeasure"
+                            : "Create Estimate & Continue"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {quickRange ? (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                            <div className="text-[10px] font-black uppercase tracking-wide text-blue-700">
+                              {quickPaymentType === "Finance"
+                                ? "Finance Estimate Range"
+                                : "Quick Estimate Range"}
+                            </div>
+                            <div className="mt-1 text-2xl font-black text-slate-950">
+                              {formatMoney(quickRange.low)} -{" "}
+                              {formatMoney(quickRange.high)}
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-slate-600">
+                              Midpoint: {formatMoney(quickRange.midpoint)}
+                            </div>
+
+                            {quickPaymentType === "Finance" && (
+                              <div className="mt-3 rounded-md bg-white/70 p-3 text-xs font-semibold text-slate-700">
+                                <div>
+                                  Cash base range:{" "}
+                                  {formatMoney(quickRange.cashLow)} -{" "}
+                                  {formatMoney(quickRange.cashHigh)}
+                                </div>
+                                <div className="mt-1">
+                                  Dealer fee pass-through:{" "}
+                                  {quickRange.dealerFeePercent.toFixed(2)}%
+                                </div>
+                                <div className="mt-1">
+                                  Customer sees the total finance price only.
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+                            Complete the quick estimate inputs to generate a range.
+                          </div>
+                        )}
+
+                        <p className="text-xs font-semibold text-slate-600">
+                          {quickEstimateDisclaimer}
+                        </p>
+
+                        <button
+                          onClick={createQuickEstimate}
+                          disabled={saving}
+                          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {saving ? "Saving..." : "Create Quick Estimate"}
+                        </button>
+
+                        {quickCreatedId && (
+                          <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                            <div className="text-xs font-black text-green-800">
+                              Quick estimate saved.
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(`/estimates/${quickCreatedId}`)
+                              }
+                              className="mt-3 w-full rounded-md bg-green-700 px-3 py-2 text-xs font-black text-white hover:bg-green-800"
+                            >
+                              Open Saved Estimate
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = false,
+  inputType = "text",
+  onBlur,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  inputType?: string;
+  onBlur?: () => void;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <input
+        type={inputType}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      />
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      />
+    </div>
+  );
+}
+
+function IntegerField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      />
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  optionValues,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  optionValues?: string[];
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      >
+        <option value="">Select</option>
+        {options.map((option, index) => {
+          const optionValue = optionValues?.[index] ?? option;
+
+          return (
+            <option key={optionValue} value={optionValue}>
+              {option}
+            </option>
+          );
+        })}
+      </select>
+    </div>
+  );
+}

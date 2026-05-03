@@ -1,0 +1,1304 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type StoryAreaRow = {
+  story: string;
+  areaSq: string;
+};
+
+type PitchAreaRow = {
+  pitch: string;
+  areaSq: string;
+};
+
+type Estimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  status: string | null;
+  job_type: string | null;
+
+  roof_squares: number | null;
+  waste_percent: number | null;
+  stories: string | null;
+  roof_layers: number | null;
+
+  story_area_breakdown:
+    | Array<{
+        story?: string;
+        area_sq?: number | string;
+        area_sf?: number | string;
+      }>
+    | null;
+
+  pitch: string | null;
+  pitch_area_breakdown:
+    | Array<{
+        pitch?: string;
+        area_sq?: number | string;
+        area_sf?: number | string;
+      }>
+    | null;
+
+  eaves_lf: number | null;
+  rakes_lf: number | null;
+  hips_lf: number | null;
+  ridges_lf: number | null;
+  valleys_lf: number | null;
+  flashing_lf: number | null;
+  step_flashing_lf: number | null;
+
+  has_solar: boolean | null;
+  has_gutters: boolean | null;
+  has_skylights: boolean | null;
+  needs_cricket: boolean | null;
+
+  solar_panel_count: number | null;
+  solar_array_count: number | null;
+
+  payment_type: string | null;
+  estimate_goal: string | null;
+
+  insurance_approved_rcv: number | null;
+  insurance_pwi_depreciation_total: number | null;
+  insurance_is_rps_acv: boolean | null;
+  insurance_deductible: number | null;
+  financing_out_of_pocket: boolean | null;
+  financing_upgrades: boolean | null;
+};
+
+const storyOptions = ["One Story", "Two Story", "Three Story"];
+const pitchOptions = Array.from({ length: 25 }, (_, index) => `${index}/12`);
+
+function getStatusBadge(status: string | null) {
+  const base =
+    "inline-flex items-center whitespace-nowrap rounded-md px-2.5 py-0.5 text-[11px] font-bold";
+
+  switch (status) {
+    case "Draft - Pending Measurements":
+      return `${base} bg-amber-100 text-amber-700`;
+    case "Draft - Pending Information":
+      return `${base} bg-orange-100 text-orange-700`;
+    case "Proposal Created":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Proposal Sent":
+      return `${base} bg-violet-100 text-violet-700`;
+    case "Proposal Signed":
+      return `${base} bg-green-100 text-green-700`;
+    case "Orders Created":
+      return `${base} bg-cyan-100 text-cyan-700`;
+    case "Orders Sent":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Lost":
+      return `${base} bg-slate-200 text-slate-700`;
+    case "Archived":
+      return `${base} bg-slate-100 text-slate-500`;
+    default:
+      return `${base} bg-slate-100 text-slate-600`;
+  }
+}
+
+function toNumber(value: string) {
+  if (value.trim() === "") return null;
+  const numberValue = Number(value);
+  return Number.isNaN(numberValue) ? null : numberValue;
+}
+
+function toInputValue(value: number | null | undefined) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function requireNumber(label: string, value: string) {
+  if (value.trim() === "") return `${label} is required.`;
+
+  const numberValue = Number(value);
+
+  if (Number.isNaN(numberValue)) return `${label} must be a number.`;
+  if (numberValue < 0) return `${label} must be 0 or greater.`;
+
+  return "";
+}
+
+function boolToYesNo(value: boolean | null | undefined) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "";
+}
+
+function yesNoToBool(value: string) {
+  if (value === "Yes") return true;
+  if (value === "No") return false;
+  return null;
+}
+
+function StepPill({
+  label,
+  state = "upcoming",
+}: {
+  label: string;
+  state?: "complete" | "active" | "upcoming";
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-1.5 text-[11px] font-black uppercase tracking-wide ${
+        state === "complete"
+          ? "border-green-200 bg-green-50 text-green-700"
+          : state === "active"
+          ? "border-blue-200 bg-blue-50 text-blue-700"
+          : "border-slate-200 bg-white text-slate-400"
+      }`}
+    >
+      {label}
+    </div>
+  );
+}
+
+export default function JobQuestionsPage() {
+  const router = useRouter();
+  const params = useParams();
+
+  const estimateId =
+    typeof params.id === "string" ? params.id : params.id?.[0] ?? "";
+
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const [roofSquares, setRoofSquares] = useState("");
+  const [wastePercent, setWastePercent] = useState("10");
+  const [roofLayers, setRoofLayers] = useState("");
+
+  const [storyRows, setStoryRows] = useState<StoryAreaRow[]>([
+    { story: "", areaSq: "" },
+  ]);
+
+  const [pitchRows, setPitchRows] = useState<PitchAreaRow[]>([
+    { pitch: "", areaSq: "" },
+  ]);
+
+  const [eavesLf, setEavesLf] = useState("");
+  const [rakesLf, setRakesLf] = useState("");
+  const [hipsLf, setHipsLf] = useState("");
+  const [ridgesLf, setRidgesLf] = useState("");
+  const [valleysLf, setValleysLf] = useState("");
+  const [flashingLf, setFlashingLf] = useState("");
+  const [stepFlashingLf, setStepFlashingLf] = useState("");
+
+  const [jobType, setJobType] = useState("Insurance");
+  const [estimateGoal, setEstimateGoal] = useState("Best Value");
+  const [paymentType, setPaymentType] = useState("");
+
+  const [insuranceApprovedRcv, setInsuranceApprovedRcv] = useState("");
+  const [insurancePwiDepreciationTotal, setInsurancePwiDepreciationTotal] =
+    useState("");
+  const [insuranceIsRpsAcv, setInsuranceIsRpsAcv] = useState("");
+  const [insuranceDeductible, setInsuranceDeductible] = useState("");
+  const [financingScope, setFinancingScope] = useState("None");
+
+  const [hasSolar, setHasSolar] = useState("");
+  const [solarPanelCount, setSolarPanelCount] = useState("");
+  const [solarArrayCount, setSolarArrayCount] = useState("");
+  const [hasGutters, setHasGutters] = useState("");
+  const [hasSkylights, setHasSkylights] = useState("");
+  const [needsCricket, setNeedsCricket] = useState("");
+
+  useEffect(() => {
+    async function loadEstimate() {
+      if (!estimateId) return;
+
+      const { data, error } = await supabase
+        .from("estimates")
+        .select(
+          [
+            "id",
+            "customer_name",
+            "property_address",
+            "status",
+            "job_type",
+            "roof_squares",
+            "waste_percent",
+            "stories",
+            "roof_layers",
+            "story_area_breakdown",
+            "pitch",
+            "pitch_area_breakdown",
+            "eaves_lf",
+            "rakes_lf",
+            "hips_lf",
+            "ridges_lf",
+            "valleys_lf",
+            "flashing_lf",
+            "step_flashing_lf",
+            "has_solar",
+            "has_gutters",
+            "has_skylights",
+            "needs_cricket",
+            "solar_panel_count",
+            "solar_array_count",
+            "payment_type",
+            "estimate_goal",
+            "insurance_approved_rcv",
+            "insurance_pwi_depreciation_total",
+            "insurance_is_rps_acv",
+            "insurance_deductible",
+            "financing_out_of_pocket",
+            "financing_upgrades",
+          ].join(", ")
+        )
+        .eq("id", estimateId)
+        .single();
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        const loaded = data as Estimate;
+        setEstimate(loaded);
+
+        setRoofSquares(toInputValue(loaded.roof_squares));
+        setWastePercent(toInputValue(loaded.waste_percent ?? 10));
+        setRoofLayers(toInputValue(loaded.roof_layers));
+
+        if (
+          Array.isArray(loaded.story_area_breakdown) &&
+          loaded.story_area_breakdown.length > 0
+        ) {
+          setStoryRows(
+            loaded.story_area_breakdown.map((row) => ({
+              story: String(row.story ?? ""),
+              areaSq:
+                row.area_sq !== null && row.area_sq !== undefined
+                  ? String(row.area_sq)
+                  : row.area_sf === null || row.area_sf === undefined
+                  ? ""
+                  : String(Number(row.area_sf) / 100),
+            }))
+          );
+        } else {
+          setStoryRows([
+            {
+              story: loaded.stories ?? "",
+              areaSq: toInputValue(loaded.roof_squares),
+            },
+          ]);
+        }
+
+        if (
+          Array.isArray(loaded.pitch_area_breakdown) &&
+          loaded.pitch_area_breakdown.length > 0
+        ) {
+          setPitchRows(
+            loaded.pitch_area_breakdown.map((row) => ({
+              pitch: String(row.pitch ?? ""),
+              areaSq:
+                row.area_sq !== null && row.area_sq !== undefined
+                  ? String(row.area_sq)
+                  : row.area_sf === null || row.area_sf === undefined
+                  ? ""
+                  : String(Number(row.area_sf) / 100),
+            }))
+          );
+        } else {
+          setPitchRows([
+            {
+              pitch: loaded.pitch ?? "",
+              areaSq: toInputValue(loaded.roof_squares),
+            },
+          ]);
+        }
+
+        setEavesLf(toInputValue(loaded.eaves_lf));
+        setRakesLf(toInputValue(loaded.rakes_lf));
+        setHipsLf(toInputValue(loaded.hips_lf));
+        setRidgesLf(toInputValue(loaded.ridges_lf));
+        setValleysLf(toInputValue(loaded.valleys_lf));
+        setFlashingLf(toInputValue(loaded.flashing_lf));
+        setStepFlashingLf(toInputValue(loaded.step_flashing_lf));
+
+        setJobType(loaded.job_type === "Retail" ? "Retail" : "Insurance");
+        setEstimateGoal(loaded.estimate_goal ?? "Best Value");
+        setPaymentType(loaded.payment_type ?? "");
+
+        setInsuranceApprovedRcv(toInputValue(loaded.insurance_approved_rcv));
+        setInsurancePwiDepreciationTotal(
+          toInputValue(loaded.insurance_pwi_depreciation_total)
+        );
+        setInsuranceIsRpsAcv(boolToYesNo(loaded.insurance_is_rps_acv));
+        setInsuranceDeductible(toInputValue(loaded.insurance_deductible));
+
+        if (loaded.financing_out_of_pocket && loaded.financing_upgrades) {
+          setFinancingScope("Both");
+        } else if (loaded.financing_out_of_pocket) {
+          setFinancingScope("Out of Pocket");
+        } else if (loaded.financing_upgrades) {
+          setFinancingScope("Upgrades");
+        } else {
+          setFinancingScope("None");
+        }
+
+        setHasSolar(boolToYesNo(loaded.has_solar));
+        setSolarPanelCount(toInputValue(loaded.solar_panel_count));
+        setSolarArrayCount(toInputValue(loaded.solar_array_count));
+        setHasGutters(boolToYesNo(loaded.has_gutters));
+        setHasSkylights(boolToYesNo(loaded.has_skylights));
+        setNeedsCricket(boolToYesNo(loaded.needs_cricket));
+      }
+
+      setLoading(false);
+    }
+
+    loadEstimate();
+  }, [estimateId]);
+
+  const storyTotal = useMemo(() => {
+    return storyRows.reduce((sum, row) => {
+      const parsed = Number(row.areaSq);
+      return Number.isNaN(parsed) ? sum : sum + parsed;
+    }, 0);
+  }, [storyRows]);
+
+  const pitchTotal = useMemo(() => {
+    return pitchRows.reduce((sum, row) => {
+      const parsed = Number(row.areaSq);
+      return Number.isNaN(parsed) ? sum : sum + parsed;
+    }, 0);
+  }, [pitchRows]);
+
+  const storyTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+
+    for (const row of storyRows) {
+      const story = row.story.trim();
+      const parsed = Number(row.areaSq);
+
+      if (!story || Number.isNaN(parsed)) continue;
+
+      totals[story] = (totals[story] || 0) + parsed;
+    }
+
+    return Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+  }, [storyRows]);
+
+  const pitchTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+
+    for (const row of pitchRows) {
+      const pitch = row.pitch.trim();
+      const parsed = Number(row.areaSq);
+
+      if (!pitch || Number.isNaN(parsed)) continue;
+
+      totals[pitch] = (totals[pitch] || 0) + parsed;
+    }
+
+    return Object.entries(totals).sort(([a], [b]) => {
+      return Number(a.split("/")[0]) - Number(b.split("/")[0]);
+    });
+  }, [pitchRows]);
+
+  function updateStoryRow(
+    index: number,
+    field: keyof StoryAreaRow,
+    value: string
+  ) {
+    setStoryRows((current) =>
+      current.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, [field]: value } : row
+      )
+    );
+  }
+
+  function updatePitchRow(
+    index: number,
+    field: keyof PitchAreaRow,
+    value: string
+  ) {
+    setPitchRows((current) =>
+      current.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, [field]: value } : row
+      )
+    );
+  }
+
+  function addStoryRow() {
+    setStoryRows((current) => [...current, { story: "", areaSq: "" }]);
+  }
+
+  function addPitchRow() {
+    setPitchRows((current) => [...current, { pitch: "", areaSq: "" }]);
+  }
+
+  function removeStoryRow(index: number) {
+    setStoryRows((current) =>
+      current.length === 1
+        ? current
+        : current.filter((_, rowIndex) => rowIndex !== index)
+    );
+  }
+
+  function removePitchRow(index: number) {
+    setPitchRows((current) =>
+      current.length === 1
+        ? current
+        : current.filter((_, rowIndex) => rowIndex !== index)
+    );
+  }
+
+  function validateForm() {
+    const requiredNumberChecks = [
+      ["Roof Squares", roofSquares],
+      ["Waste %", wastePercent],
+      ["Roof Layers", roofLayers],
+      ["Eaves LF", eavesLf],
+      ["Rakes LF", rakesLf],
+      ["Hips LF", hipsLf],
+      ["Ridges LF", ridgesLf],
+      ["Valleys LF", valleysLf],
+      ["Flashing LF", flashingLf],
+      ["Step Flashing LF", stepFlashingLf],
+    ];
+
+    for (const [label, value] of requiredNumberChecks) {
+      const error = requireNumber(label, value);
+      if (error) return error;
+    }
+
+    const layerCount = Number(roofLayers);
+    if (!Number.isInteger(layerCount)) {
+      return "Roof Layers must be a whole number.";
+    }
+
+    for (const [index, row] of storyRows.entries()) {
+      if (!row.story.trim()) {
+        return `Story is required on story row ${index + 1}.`;
+      }
+
+      const areaError = requireNumber(`Story area row ${index + 1}`, row.areaSq);
+      if (areaError) return areaError;
+    }
+
+    for (const [index, row] of pitchRows.entries()) {
+      if (!row.pitch.trim()) {
+        return `Pitch is required on pitch row ${index + 1}.`;
+      }
+
+      const areaError = requireNumber(`Pitch area row ${index + 1}`, row.areaSq);
+      if (areaError) return areaError;
+    }
+
+    const roofSquareTotal = Number(roofSquares);
+
+    if (
+      !Number.isNaN(roofSquareTotal) &&
+      Math.abs(storyTotal - roofSquareTotal) > 0.01
+    ) {
+      return `Story area total must match Roof Squares. Current story total is ${storyTotal.toFixed(
+        2
+      )} SQ.`;
+    }
+
+    if (
+      !Number.isNaN(roofSquareTotal) &&
+      Math.abs(pitchTotal - roofSquareTotal) > 0.01
+    ) {
+      return `Pitch area total must match Roof Squares. Current pitch total is ${pitchTotal.toFixed(
+        2
+      )} SQ.`;
+    }
+
+    if (!jobType.trim()) return "Insurance or Retail is required.";
+
+
+    if (jobType === "Insurance") {
+      const insuranceChecks = [
+        ["Total Insurance Approved RCV", insuranceApprovedRcv],
+        ["PWI + Depreciation Combined", insurancePwiDepreciationTotal],
+        ["Deductible Amount", insuranceDeductible],
+      ];
+
+      for (const [label, value] of insuranceChecks) {
+        const error = requireNumber(label, value);
+        if (error) return error;
+      }
+
+      if (!insuranceIsRpsAcv) {
+        return "RPS / ACV answer is required.";
+      }
+    }
+
+    if (jobType === "Retail" && !paymentType.trim()) {
+      return "Retail payment type is required.";
+    }
+
+    if (!hasSolar) return "Solar Present answer is required.";
+
+    if (hasSolar === "Yes") {
+      const solarChecks = [
+        ["Number of Solar Panels", solarPanelCount],
+        ["Number of Solar Arrays", solarArrayCount],
+      ];
+
+      for (const [label, value] of solarChecks) {
+        const error = requireNumber(label, value);
+        if (error) return error;
+      }
+    }
+
+    if (!hasGutters) return "Gutters / Downspouts answer is required.";
+    if (!hasSkylights) return "Skylights answer is required.";
+    if (!needsCricket) return "Cricket Needed answer is required.";
+
+    return "";
+  }
+
+  async function saveQuestions() {
+    if (!estimate) return;
+
+    setErrorMessage("");
+
+    const validationError = validateForm();
+
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    setSaving(true);
+
+    const roofSquareTotal = Number(roofSquares);
+    const wastePercentValue = Number(wastePercent);
+    const calculatedRoofAreaSf = roofSquareTotal * 100;
+    const calculatedWasteSquares =
+      roofSquareTotal * (1 + wastePercentValue / 100);
+
+    const eaves = Number(eavesLf);
+    const rakes = Number(rakesLf);
+    const hips = Number(hipsLf);
+    const ridges = Number(ridgesLf);
+
+    const starterLf = eaves + rakes;
+    const dripEdgeLf = eaves + rakes;
+    const ridgeCapLf = hips + ridges;
+
+    const storyAreaBreakdown = storyRows.map((row) => ({
+      story: row.story.trim(),
+      area_sq: Number(row.areaSq),
+      area_sf: Number(row.areaSq) * 100,
+    }));
+
+    const pitchAreaBreakdown = pitchRows.map((row) => ({
+      pitch: row.pitch.trim(),
+      area_sq: Number(row.areaSq),
+      area_sf: Number(row.areaSq) * 100,
+    }));
+
+    const storyRank: Record<string, number> = {
+      "One Story": 1,
+      "Two Story": 2,
+      "Three Story": 3,
+    };
+
+    const highestStory =
+      storyAreaBreakdown
+        .map((row) => row.story)
+        .sort((a, b) => (storyRank[b] || 0) - (storyRank[a] || 0))[0] ||
+      "One Story";
+
+    const financingOutOfPocket =
+      financingScope === "Out of Pocket" || financingScope === "Both";
+    const financingUpgrades =
+      financingScope === "Upgrades" || financingScope === "Both";
+
+    const { error: saveError } = await supabase
+      .from("estimates")
+      .update({
+        roof_area_sf: calculatedRoofAreaSf,
+        roof_squares: toNumber(roofSquares),
+        waste_percent: toNumber(wastePercent),
+        waste_squares: calculatedWasteSquares,
+        roof_layers: toNumber(roofLayers),
+
+        story_area_breakdown: storyAreaBreakdown,
+        stories: highestStory,
+
+        pitch: pitchAreaBreakdown.map((row) => row.pitch).join(", "),
+        pitch_area_breakdown: pitchAreaBreakdown,
+
+        eaves_lf: toNumber(eavesLf),
+        rakes_lf: toNumber(rakesLf),
+        hips_lf: toNumber(hipsLf),
+        ridges_lf: toNumber(ridgesLf),
+        valleys_lf: toNumber(valleysLf),
+        flashing_lf: toNumber(flashingLf),
+        step_flashing_lf: toNumber(stepFlashingLf),
+        drip_edge_lf: dripEdgeLf,
+        starter_lf: starterLf,
+        ridge_cap_lf: ridgeCapLf,
+
+        job_type: jobType,
+        estimate_goal: estimateGoal,
+        payment_type: jobType === "Retail" ? paymentType : null,
+        financing_down_payment: null,
+
+        insurance_approved_rcv:
+          jobType === "Insurance" ? toNumber(insuranceApprovedRcv) : null,
+        insurance_pwi_depreciation_total:
+          jobType === "Insurance"
+            ? toNumber(insurancePwiDepreciationTotal)
+            : null,
+        insurance_is_rps_acv:
+          jobType === "Insurance" ? yesNoToBool(insuranceIsRpsAcv) : null,
+        insurance_deductible:
+          jobType === "Insurance" ? toNumber(insuranceDeductible) : null,
+        financing_out_of_pocket:
+          jobType === "Insurance" ? financingOutOfPocket : false,
+        financing_upgrades: jobType === "Insurance" ? financingUpgrades : false,
+
+        has_solar: yesNoToBool(hasSolar),
+        solar_panel_count:
+          hasSolar === "Yes" ? toNumber(solarPanelCount) : null,
+        solar_array_count:
+          hasSolar === "Yes" ? toNumber(solarArrayCount) : null,
+        has_gutters: yesNoToBool(hasGutters),
+        has_skylights: yesNoToBool(hasSkylights),
+        needs_cricket: yesNoToBool(needsCricket),
+
+        measurement_verified: true,
+        job_questions_completed: true,
+      })
+      .eq("id", estimate.id);
+
+    if (saveError) {
+      setSaving(false);
+      setErrorMessage(saveError.message);
+      return;
+    }
+
+    const { error: optionError } = await supabase.rpc(
+      "ensure_default_estimate_options",
+      {
+        p_estimate_id: estimate.id,
+      }
+    );
+
+    setSaving(false);
+
+    if (optionError) {
+      setErrorMessage(optionError.message);
+      return;
+    }
+
+    router.push(`/estimates/${estimate.id}/options`);
+  }
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="rounded-lg bg-white p-4 text-sm font-semibold shadow">
+          Loading job questions...
+        </div>
+      </main>
+    );
+  }
+
+  if (!estimate) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-6">
+        <div className="rounded-lg bg-white p-5 shadow">
+          Estimate not found.
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Estimates" />
+
+        <section className="min-h-screen min-w-0 flex-1 p-5 lg:ml-[var(--sidebar-width)]">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-5 border-b border-slate-300 pb-5">
+              <button
+                onClick={() =>
+                  router.push(`/estimates/${estimate.id}/measurements`)
+                }
+                className="mb-2 text-xs font-bold text-slate-500 hover:text-slate-900"
+              >
+                ← Back to Measurements
+              </button>
+
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h1 className="text-3xl font-black text-slate-950">
+                      Job Questions
+                    </h1>
+                    <span className={getStatusBadge(estimate.status)}>
+                      {estimate.status || "No Status"}
+                    </span>
+                  </div>
+
+                  <p className="mt-1 max-w-4xl text-sm font-medium text-slate-600">
+                    {estimate.customer_name || "Unnamed Customer"} ·{" "}
+                    {estimate.property_address || "No address"}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <StepPill label="Customer" state="complete" />
+                  <StepPill label="Measurements" state="complete" />
+                  <StepPill label="Questions" state="active" />
+                  <StepPill label="Options" />
+                  <StepPill label="Proposal" />
+                  <StepPill label="Orders" />
+                </div>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <div className="mb-5 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">
+                {errorMessage}
+              </div>
+            )}
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="min-w-0 space-y-4">
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Roof Measurements
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-3 p-4 md:grid-cols-3">
+                    <NumberField
+                      label="Roof Squares"
+                      value={roofSquares}
+                      onChange={setRoofSquares}
+                      required
+                    />
+
+                    <NumberField
+                      label="Waste %"
+                      value={wastePercent}
+                      onChange={setWastePercent}
+                      required
+                    />
+
+                    <NumberField
+                      label="Eaves LF"
+                      value={eavesLf}
+                      onChange={setEavesLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Rakes LF"
+                      value={rakesLf}
+                      onChange={setRakesLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Hips LF"
+                      value={hipsLf}
+                      onChange={setHipsLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Ridges LF"
+                      value={ridgesLf}
+                      onChange={setRidgesLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Valleys LF"
+                      value={valleysLf}
+                      onChange={setValleysLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Flashing LF"
+                      value={flashingLf}
+                      onChange={setFlashingLf}
+                      required
+                    />
+
+                    <NumberField
+                      label="Step Flashing LF"
+                      value={stepFlashingLf}
+                      onChange={setStepFlashingLf}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Roof Layers
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Enter the total number of existing roof layers. Whole numbers only.
+                    </p>
+
+                    <div className="max-w-xs">
+                      <IntegerField
+                        label="Roof Layers"
+                        value={roofLayers}
+                        onChange={setRoofLayers}
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Story Area Breakdown
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Enter the number of squares for each story. The story
+                      total must match Roof Squares.
+                    </p>
+
+                    <div className="space-y-2">
+                      {storyRows.map((row, index) => (
+                        <div
+                          key={index}
+                          className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]"
+                        >
+                          <SelectField
+                            label="Story"
+                            value={row.story}
+                            onChange={(value) =>
+                              updateStoryRow(index, "story", value)
+                            }
+                            options={storyOptions}
+                            required
+                          />
+
+                          <NumberField
+                            label="Area SQ"
+                            value={row.areaSq}
+                            onChange={(value) =>
+                              updateStoryRow(index, "areaSq", value)
+                            }
+                            required
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removeStoryRow(index)}
+                            disabled={storyRows.length === 1}
+                            className="self-end rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-slate-700 hover:bg-white disabled:opacity-40"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={addStoryRow}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
+                      >
+                        Add Story Row
+                      </button>
+
+                      <div className="space-y-1 text-xs font-black text-slate-700">
+                        {storyTotals.length > 0 && (
+                          <div className="space-y-1 rounded-md bg-slate-100 px-3 py-2">
+                            {storyTotals.map(([story, total]) => (
+                              <div
+                                key={story}
+                                className="flex items-center justify-between gap-4"
+                              >
+                                <span>{story}</span>
+                                <span>{total.toFixed(2)} SQ</span>
+                              </div>
+                            ))}
+
+                            <div className="flex items-center justify-between gap-4 border-t border-slate-300 pt-1">
+                              <span>Story Total</span>
+                              <span>{storyTotal.toFixed(2)} SQ</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Pitch Area Breakdown
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      Enter the number of squares for each pitch. The pitch
+                      total must match Roof Squares.
+                    </p>
+
+                    <div className="space-y-2">
+                      {pitchRows.map((row, index) => (
+                        <div
+                          key={index}
+                          className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]"
+                        >
+                          <SelectField
+                            label="Pitch"
+                            value={row.pitch}
+                            onChange={(value) =>
+                              updatePitchRow(index, "pitch", value)
+                            }
+                            options={pitchOptions}
+                            required
+                          />
+
+                          <NumberField
+                            label="Area SQ"
+                            value={row.areaSq}
+                            onChange={(value) =>
+                              updatePitchRow(index, "areaSq", value)
+                            }
+                            required
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removePitchRow(index)}
+                            disabled={pitchRows.length === 1}
+                            className="self-end rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-slate-700 hover:bg-white disabled:opacity-40"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={addPitchRow}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
+                      >
+                        Add Pitch Row
+                      </button>
+
+                      <div className="space-y-1 text-xs font-black text-slate-700">
+                        {pitchTotals.length > 0 && (
+                          <div className="space-y-1 rounded-md bg-slate-100 px-3 py-2">
+                            {pitchTotals.map(([pitch, total]) => (
+                              <div
+                                key={pitch}
+                                className="flex items-center justify-between gap-4"
+                              >
+                                <span>{pitch}</span>
+                                <span>{total.toFixed(2)} SQ</span>
+                              </div>
+                            ))}
+
+                            <div className="flex items-center justify-between gap-4 border-t border-slate-300 pt-1">
+                              <span>Pitch Total</span>
+                              <span>{pitchTotal.toFixed(2)} SQ</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Job Setup
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-3 p-4 md:grid-cols-2">
+                    <SelectField
+                      label="Insurance or Retail"
+                      value={jobType}
+                      onChange={setJobType}
+                      options={["Insurance", "Retail"]}
+                      required
+                    />
+
+                    {jobType === "Insurance" && (
+                      <>
+                        <NumberField
+                          label="Total Insurance Approved RCV"
+                          value={insuranceApprovedRcv}
+                          onChange={setInsuranceApprovedRcv}
+                          required
+                        />
+
+                        <NumberField
+                          label="PWI + Depreciation Combined"
+                          value={insurancePwiDepreciationTotal}
+                          onChange={setInsurancePwiDepreciationTotal}
+                          required
+                        />
+
+                        <YesNoField
+                          label="RPS / ACV?"
+                          value={insuranceIsRpsAcv}
+                          onChange={setInsuranceIsRpsAcv}
+                          required
+                        />
+
+                        <NumberField
+                          label="Deductible Amount"
+                          value={insuranceDeductible}
+                          onChange={setInsuranceDeductible}
+                          required
+                        />
+
+                        <SelectField
+                          label="Financing Need"
+                          value={financingScope}
+                          onChange={setFinancingScope}
+                          options={[
+                            "None",
+                            "Out of Pocket",
+                            "Upgrades",
+                            "Both",
+                          ]}
+                          required
+                        />
+                      </>
+                    )}
+
+                    {jobType === "Retail" && (
+                      <SelectField
+                        label="Payment Type"
+                        value={paymentType}
+                        onChange={setPaymentType}
+                        options={["Cash", "Financing"]}
+                        required
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Site Conditions
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-3 p-4 md:grid-cols-2">
+                    <YesNoField
+                      label="Solar Present"
+                      value={hasSolar}
+                      onChange={setHasSolar}
+                      required
+                    />
+
+                    {hasSolar === "Yes" && (
+                      <>
+                        <NumberField
+                          label="Number of Solar Panels"
+                          value={solarPanelCount}
+                          onChange={setSolarPanelCount}
+                          required
+                        />
+
+                        <NumberField
+                          label="Number of Solar Arrays"
+                          value={solarArrayCount}
+                          onChange={setSolarArrayCount}
+                          required
+                        />
+                      </>
+                    )}
+
+                    <YesNoField
+                      label="Gutters / Downspouts Involved"
+                      value={hasGutters}
+                      onChange={setHasGutters}
+                      required
+                    />
+
+                    <YesNoField
+                      label="Skylights Present"
+                      value={hasSkylights}
+                      onChange={setHasSkylights}
+                      required
+                    />
+
+                    <YesNoField
+                      label="Cricket Needed"
+                      value={needsCricket}
+                      onChange={setNeedsCricket}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <aside className="space-y-4">
+                <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-4 py-3">
+                    <h2 className="text-xs font-black uppercase tracking-wide text-slate-800">
+                      Next Step
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <p className="text-sm font-medium text-slate-600">
+                      Complete all required fields, then create estimate options.
+                    </p>
+
+                    <button
+                      onClick={saveQuestions}
+                      disabled={saving}
+                      className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {saving ? "Saving..." : "Save & Create Options"}
+                    </button>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      />
+    </div>
+  );
+}
+
+function IntegerField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      />
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  required?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+        {label} {required ? "*" : ""}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+      >
+        <option value="">Select</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function YesNoField({
+  label,
+  value,
+  onChange,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <SelectField
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={["Yes", "No"]}
+      required={required}
+    />
+  );
+}

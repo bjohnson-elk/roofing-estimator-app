@@ -1,0 +1,594 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+import Link from "next/link";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type Estimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  customer_phone?: string | null;
+  customer_email?: string | null;
+  sales_rep: string | null;
+  status: string | null;
+  subtotal_price: number | null;
+  job_type?: string | null;
+  measurement_status?: string | null;
+  created_at: string | null;
+};
+
+type EstimateViewFilter =
+  | "Active"
+  | "Drafts"
+  | "Proposals"
+  | "Orders"
+  | "Lost"
+  | "Archived"
+  | "All";
+
+const estimateViewFilters: EstimateViewFilter[] = [
+  "Active",
+  "Drafts",
+  "Proposals",
+  "Orders",
+  "Lost",
+  "Archived",
+  "All",
+];
+
+const statusFilters = [
+  "Draft - Pending Measurements",
+  "Draft - Pending Information",
+  "Proposal Created",
+  "Proposal Sent",
+  "Proposal Signed",
+  "Orders Created",
+  "Orders Sent",
+  "Lost",
+  "Archived",
+];
+
+function matchesEstimateView(status: string | null, view: EstimateViewFilter) {
+  const normalizedStatus = status || "";
+
+  if (view === "All") return true;
+
+  if (view === "Active") {
+    return normalizedStatus !== "Lost" && normalizedStatus !== "Archived";
+  }
+
+  if (view === "Drafts") {
+    return (
+      normalizedStatus === "Draft - Pending Measurements" ||
+      normalizedStatus === "Draft - Pending Information"
+    );
+  }
+
+  if (view === "Proposals") {
+    return (
+      normalizedStatus === "Proposal Created" ||
+      normalizedStatus === "Proposal Sent" ||
+      normalizedStatus === "Proposal Signed"
+    );
+  }
+
+  if (view === "Orders") {
+    return (
+      normalizedStatus === "Orders Created" ||
+      normalizedStatus === "Orders Sent"
+    );
+  }
+
+  if (view === "Lost") {
+    return normalizedStatus === "Lost";
+  }
+
+  if (view === "Archived") {
+    return normalizedStatus === "Archived";
+  }
+
+  return true;
+}
+
+function formatMoney(value: number | null) {
+  if (!value) return "Not Priced";
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "No date";
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getStatusBadge(status: string | null) {
+  const base = "rounded-md px-3 py-1 text-xs font-semibold";
+
+  switch (status) {
+    case "Draft - Pending Measurements":
+      return `${base} bg-amber-100 text-amber-700`;
+    case "Draft - Pending Information":
+      return `${base} bg-orange-100 text-orange-700`;
+    case "Proposal Created":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Proposal Sent":
+      return `${base} bg-violet-100 text-violet-700`;
+    case "Proposal Signed":
+      return `${base} bg-green-100 text-green-700`;
+    case "Orders Created":
+      return `${base} bg-cyan-100 text-cyan-700`;
+    case "Orders Sent":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Lost":
+      return `${base} bg-slate-200 text-slate-700`;
+    case "Archived":
+      return `${base} bg-slate-900 text-white`;
+    default:
+      return `${base} bg-slate-100 text-slate-600`;
+  }
+}
+
+function EstimatesPageContent() {
+  const searchParams = useSearchParams();
+  const statusFromUrl = searchParams.get("status");
+
+  const [estimates, setEstimates] = useState<Estimate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState<string | null>(
+    statusFromUrl
+  );
+  const [selectedViewFilter, setSelectedViewFilter] =
+    useState<EstimateViewFilter>(statusFromUrl ? "All" : "Active");
+  const [searchText, setSearchText] = useState("");
+  const [selectedEstimateId, setSelectedEstimateId] = useState<string | null>(
+    null
+  );
+
+  useEffect(() => {
+    setSelectedStatus(statusFromUrl);
+
+    if (statusFromUrl) {
+      setSelectedViewFilter("All");
+    }
+  }, [statusFromUrl]);
+
+  useEffect(() => {
+    async function loadEstimates() {
+      const { data, error } = await supabase
+        .from("estimates")
+        .select(
+          "id, customer_name, property_address, customer_phone, customer_email, sales_rep, status, subtotal_price, job_type, measurement_status, created_at"
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        setEstimates((data ?? []) as Estimate[]);
+      }
+
+      setLoading(false);
+    }
+
+    loadEstimates();
+  }, []);
+
+  const filteredEstimates = useMemo(() => {
+    return estimates.filter((estimate) => {
+      const matchesView = matchesEstimateView(
+        estimate.status,
+        selectedViewFilter
+      );
+
+      const matchesStatus = selectedStatus
+        ? estimate.status === selectedStatus
+        : true;
+
+      const search = searchText.trim().toLowerCase();
+
+      const matchesSearch = search
+        ? `${estimate.customer_name ?? ""} ${estimate.property_address ?? ""} ${
+            estimate.sales_rep ?? ""
+          } ${estimate.customer_phone ?? ""} ${estimate.customer_email ?? ""}`
+            .toLowerCase()
+            .includes(search)
+        : true;
+
+      return matchesView && matchesStatus && matchesSearch;
+    });
+  }, [estimates, selectedStatus, selectedViewFilter, searchText]);
+
+  useEffect(() => {
+    if (filteredEstimates.length === 0) {
+      setSelectedEstimateId(null);
+      return;
+    }
+
+    const selectedStillVisible = filteredEstimates.some(
+      (estimate) => estimate.id === selectedEstimateId
+    );
+
+    if (!selectedStillVisible) {
+      setSelectedEstimateId(filteredEstimates[0].id);
+    }
+  }, [filteredEstimates, selectedEstimateId]);
+
+  const selectedEstimate =
+    filteredEstimates.find((estimate) => estimate.id === selectedEstimateId) ||
+    null;
+
+  const filteredValue = filteredEstimates.reduce(
+    (sum, estimate) => sum + (estimate.subtotal_price || 0),
+    0
+  );
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          Loading estimates...
+        </div>
+      </main>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          <h1 className="text-2xl font-bold text-red-600">
+            Estimates connection error
+          </h1>
+          <p className="mt-4 text-slate-700">{errorMessage}</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Estimates" />
+
+        <section className="min-h-screen flex-1 lg:ml-64">
+          <div className="border-b border-slate-200 bg-white px-6 py-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-slate-900">
+                  Estimates
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Search, filter, and continue estimate records.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 md:flex-row">
+                <input
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  placeholder="Search customer, address, phone, or rep..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm md:w-[440px]"
+                />
+
+                <Link
+                  href="/estimates/new"
+                  className="rounded-lg bg-blue-600 px-5 py-3 text-center text-sm font-bold text-white shadow-sm hover:bg-blue-700"
+                >
+                  + Start New Estimate
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid min-h-[calc(100vh-96px)] grid-cols-1 lg:grid-cols-[280px_430px_1fr]">
+            <aside className="border-r border-slate-200 bg-white p-5">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900">Filters</h2>
+
+                <button
+                  onClick={() => {
+                    setSelectedStatus(null);
+                    setSelectedViewFilter("Active");
+                  }}
+                  className="text-sm font-bold text-blue-600 hover:text-blue-700"
+                >
+                  Reset
+                </button>
+              </div>
+
+              <div className="mb-6 rounded-xl bg-slate-50 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  View Type
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {estimateViewFilters.map((view) => {
+                    const active = selectedViewFilter === view;
+
+                    return (
+                      <button
+                        key={view}
+                        onClick={() => {
+                          setSelectedViewFilter(view);
+                          setSelectedStatus(null);
+                        }}
+                        className={`rounded-lg px-3 py-2 text-sm font-bold ${
+                          active
+                            ? "bg-slate-900 text-white"
+                            : "bg-white text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        {view}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mb-6 rounded-xl bg-slate-50 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Current View
+                </div>
+                <div className="mt-1 text-sm font-bold text-slate-900">
+                  {selectedStatus || `${selectedViewFilter} Estimates`}
+                </div>
+                <div className="mt-3 text-2xl font-black text-slate-900">
+                  {filteredEstimates.length}
+                </div>
+                <div className="text-sm text-slate-500">
+                  {formatMoney(filteredValue)}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-3 text-xs font-black uppercase tracking-wide text-slate-500">
+                  Status
+                </div>
+
+                <div className="space-y-2">
+                  {statusFilters.map((status) => {
+                    const count = estimates.filter(
+                      (estimate) =>
+                        estimate.status === status &&
+                        matchesEstimateView(
+                          estimate.status,
+                          selectedViewFilter
+                        )
+                    ).length;
+
+                    const active = selectedStatus === status;
+
+                    return (
+                      <button
+                        key={status}
+                        onClick={() =>
+                          setSelectedStatus(active ? null : status)
+                        }
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-semibold ${
+                          active
+                            ? "bg-blue-600 text-white"
+                            : "text-slate-700 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span>{status}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs ${
+                            active
+                              ? "bg-white/20 text-white"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </aside>
+
+            <section className="border-r border-slate-200 bg-slate-100 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-slate-900">Results</h2>
+                <div className="text-sm font-semibold text-slate-500">
+                  {filteredEstimates.length}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {filteredEstimates.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+                    No estimates match this view.
+                  </div>
+                ) : (
+                  filteredEstimates.map((estimate) => {
+                    const active = estimate.id === selectedEstimateId;
+
+                    return (
+                      <button
+                        key={estimate.id}
+                        onClick={() => setSelectedEstimateId(estimate.id)}
+                        className={`w-full rounded-xl border bg-white p-4 text-left shadow-sm hover:shadow ${
+                          active
+                            ? "border-blue-500 ring-2 ring-blue-100"
+                            : "border-slate-200"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-lg font-bold text-blue-700">
+                              {estimate.customer_name || "Unnamed Customer"}
+                            </div>
+                            <div className="mt-1 text-sm text-slate-600">
+                              {estimate.property_address || "No address"}
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-sm font-bold text-slate-900">
+                              {formatMoney(estimate.subtotal_price)}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {formatDate(estimate.created_at)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between">
+                          <span className={getStatusBadge(estimate.status)}>
+                            {estimate.status || "No Status"}
+                          </span>
+
+                          <span className="text-xs font-semibold text-slate-500">
+                            {estimate.sales_rep || "Unassigned"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            <section className="bg-white p-6">
+              {!selectedEstimate ? (
+                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
+                  Select an estimate to view details.
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-6 flex flex-col gap-3 border-b border-slate-200 pb-5 xl:flex-row xl:items-start xl:justify-between">
+                    <div>
+                      <h2 className="text-3xl font-bold text-slate-900">
+                        {selectedEstimate.customer_name || "Unnamed Customer"}
+                      </h2>
+                      <p className="mt-1 text-slate-600">
+                        {selectedEstimate.property_address || "No address"}
+                      </p>
+                    </div>
+
+                    <span className={getStatusBadge(selectedEstimate.status)}>
+                      {selectedEstimate.status || "No Status"}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Total Value
+                      </div>
+                      <div className="mt-1 text-2xl font-black text-slate-900">
+                        {formatMoney(selectedEstimate.subtotal_price)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Sales Rep
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900">
+                        {selectedEstimate.sales_rep || "Unassigned"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Job Type
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900">
+                        {selectedEstimate.job_type || "Not Set"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 p-4">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Measurements
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-slate-900">
+                        {selectedEstimate.measurement_status || "Not Set"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 rounded-xl border border-slate-200">
+                    <div className="border-b border-slate-200 px-5 py-4">
+                      <h3 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                        Customer Information
+                      </h3>
+                    </div>
+
+                    <div className="space-y-3 p-5 text-sm">
+                      <div>
+                        <span className="font-bold text-slate-700">
+                          Phone:
+                        </span>{" "}
+                        {selectedEstimate.customer_phone || "Not entered"}
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-700">
+                          Email:
+                        </span>{" "}
+                        {selectedEstimate.customer_email || "Not entered"}
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-700">
+                          Created:
+                        </span>{" "}
+                        {formatDate(selectedEstimate.created_at)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <Link
+                      href={`/estimates/${selectedEstimate.id}`}
+                      className="rounded-lg bg-blue-600 px-5 py-3 text-center text-sm font-bold text-white hover:bg-blue-700"
+                    >
+                      Open Estimate
+                    </Link>
+
+                    <Link
+                      href="/dashboard"
+                      className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-center text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Back to Dashboard
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+export default function EstimatesPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-100 p-8">
+          <div className="rounded-xl bg-white p-6 shadow">
+            Loading estimates...
+          </div>
+        </main>
+      }
+    >
+      <EstimatesPageContent />
+    </Suspense>
+  );
+}

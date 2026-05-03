@@ -1,0 +1,743 @@
+"use client";
+
+import AppSidebar from "@/components/AppSidebar";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type Estimate = {
+  id: string;
+  customer_name: string | null;
+  property_address: string | null;
+  customer_phone: string | null;
+  customer_email: string | null;
+  sales_rep: string | null;
+  status: string | null;
+  job_type: string | null;
+  payment_type: string | null;
+  financing_down_payment: number | null;
+
+  roof_squares: number | null;
+  waste_percent: number | null;
+  waste_squares: number | null;
+  pitch: string | null;
+  stories: string | null;
+  has_solar: boolean | null;
+  has_gutters: boolean | null;
+  has_skylights: boolean | null;
+  has_chimney: boolean | null;
+  needs_cricket: boolean | null;
+
+  selected_option_name: string | null;
+  selected_option_price: number | null;
+  selected_option_data: Record<string, unknown> | null;
+
+  created_at: string | null;
+};
+
+function formatMoney(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "Not Priced";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "No date";
+
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getStatusBadge(status: string | null) {
+  const base = "rounded-md px-3 py-1 text-xs font-semibold";
+
+  switch (status) {
+    case "Draft - Pending Measurements":
+      return `${base} bg-amber-100 text-amber-700`;
+    case "Draft - Pending Information":
+      return `${base} bg-orange-100 text-orange-700`;
+    case "Proposal Created":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Proposal Sent":
+      return `${base} bg-violet-100 text-violet-700`;
+    case "Proposal Signed":
+      return `${base} bg-green-100 text-green-700`;
+    case "Orders Created":
+      return `${base} bg-cyan-100 text-cyan-700`;
+    case "Orders Sent":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "Lost":
+      return `${base} bg-slate-200 text-slate-700`;
+    case "Archived":
+      return `${base} bg-slate-100 text-slate-500`;
+    default:
+      return `${base} bg-slate-100 text-slate-600`;
+  }
+}
+
+function readNumber(data: Record<string, unknown> | null, keys: string[]) {
+  if (!data) return null;
+
+  for (const key of keys) {
+    const value = data[key];
+
+    if (typeof value === "number") return value;
+
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+
+  return null;
+}
+
+function readText(data: Record<string, unknown> | null, keys: string[]) {
+  if (!data) return null;
+
+  for (const key of keys) {
+    const value = data[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+export default function ProposalPage() {
+  const router = useRouter();
+  const params = useParams();
+
+  const estimateId =
+    typeof params.id === "string" ? params.id : params.id?.[0] ?? "";
+
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    async function loadEstimate() {
+      if (!estimateId) return;
+
+      const { data, error } = await supabase
+        .from("estimates")
+        .select(
+          [
+            "id",
+            "customer_name",
+            "property_address",
+            "customer_phone",
+            "customer_email",
+            "sales_rep",
+            "status",
+            "job_type",
+            "payment_type",
+            "financing_down_payment",
+            "roof_squares",
+            "waste_percent",
+            "waste_squares",
+            "pitch",
+            "stories",
+            "has_solar",
+            "has_gutters",
+            "has_skylights",
+            "has_chimney",
+            "needs_cricket",
+            "selected_option_name",
+            "selected_option_price",
+            "selected_option_data",
+            "created_at",
+          ].join(", ")
+        )
+        .eq("id", estimateId)
+        .single();
+
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        setEstimate(data as Estimate);
+      }
+
+      setLoading(false);
+    }
+
+    loadEstimate();
+  }, [estimateId]);
+
+  async function updateProposalStatus(newStatus: string) {
+    if (!estimate) return;
+
+    setSavingStatus(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const { error } = await supabase
+      .from("estimates")
+      .update({ status: newStatus })
+      .eq("id", estimate.id);
+
+    setSavingStatus(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setEstimate({
+      ...estimate,
+      status: newStatus,
+    });
+
+    setSuccessMessage(`Status updated to ${newStatus}.`);
+  }
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          Loading proposal...
+        </div>
+      </main>
+    );
+  }
+
+  if (!estimate) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <div className="rounded-xl bg-white p-6 shadow">
+          Estimate not found.
+        </div>
+      </main>
+    );
+  }
+
+  const selectedData = estimate.selected_option_data;
+
+  const optionCost = readNumber(selectedData, [
+    "total_cost",
+    "subtotal_cost",
+    "cost",
+    "option_cost",
+  ]);
+
+  const optionProfit = readNumber(selectedData, ["gross_profit", "profit"]);
+
+  const optionMargin = readNumber(selectedData, [
+    "gross_margin_percent",
+    "gross_margin",
+    "margin_percent",
+    "margin",
+  ]);
+
+  const primaryFlag = readText(selectedData, ["primary", "is_primary"]);
+
+  const canCreateOrders =
+    estimate.status === "Proposal Signed" ||
+    estimate.status === "Orders Created" ||
+    estimate.status === "Orders Sent";
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      <div className="flex">
+        <AppSidebar active="Estimates" />
+
+        <section className="min-h-screen flex-1 p-6 lg:ml-64">
+          <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <button
+                onClick={() => router.push(`/estimates/${estimate.id}`)}
+                className="mb-3 text-sm font-bold text-slate-600 hover:text-slate-900"
+              >
+                ← Back to Estimate
+              </button>
+
+              <h1 className="text-4xl font-bold text-slate-900">
+                Proposal Preview
+              </h1>
+
+              <p className="mt-1 text-lg text-slate-600">
+                {estimate.customer_name || "Unnamed Customer"} ·{" "}
+                {estimate.property_address || "No address"}
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start gap-3 xl:items-end">
+              <span className={getStatusBadge(estimate.status)}>
+                {estimate.status || "No Status"}
+              </span>
+
+              {estimate.selected_option_name && (
+                <div className="rounded-lg bg-white px-4 py-3 text-sm shadow-sm ring-1 ring-slate-200">
+                  <div className="font-bold text-slate-900">
+                    {estimate.selected_option_name}
+                  </div>
+                  <div className="text-slate-600">
+                    {formatMoney(estimate.selected_option_price)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm font-semibold text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mb-6 rounded-lg bg-green-50 p-4 text-sm font-semibold text-green-700">
+              {successMessage}
+            </div>
+          )}
+
+          {!estimate.selected_option_name ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <h2 className="text-2xl font-bold text-slate-900">
+                No option selected yet
+              </h2>
+              <p className="mt-2 text-slate-600">
+                Select an estimate option before creating a proposal.
+              </p>
+
+              <Link
+                href={`/estimates/${estimate.id}/options`}
+                className="mt-6 inline-block rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
+              >
+                Go to Estimate Options
+              </Link>
+            </div>
+          ) : (
+            <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+              <div className="space-y-6">
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                      Customer Proposal
+                    </h2>
+                  </div>
+
+                  <div className="p-8">
+                    <div className="border-b border-slate-200 pb-6">
+                      <div className="text-sm font-black uppercase tracking-widest text-slate-500">
+                        Elkstone Roofing & Construction
+                      </div>
+
+                      <h3 className="mt-4 text-3xl font-black text-slate-900">
+                        Roof Replacement Proposal
+                      </h3>
+
+                      <p className="mt-2 text-slate-600">
+                        Prepared for {estimate.customer_name || "Customer"} at{" "}
+                        {estimate.property_address || "the project address"}.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-5 border-b border-slate-200 py-6 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Customer
+                        </div>
+                        <div className="mt-1 font-bold text-slate-900">
+                          {estimate.customer_name || "Not entered"}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-600">
+                          {estimate.customer_phone || "No phone entered"}
+                        </div>
+                        <div className="text-sm text-slate-600">
+                          {estimate.customer_email || "No email entered"}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Project Address
+                        </div>
+                        <div className="mt-1 font-bold text-slate-900">
+                          {estimate.property_address || "Not entered"}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-600">
+                          Created: {formatDate(estimate.created_at)}
+                        </div>
+                        <div className="text-sm text-slate-600">
+                          Sales Rep: {estimate.sales_rep || "Unassigned"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-5 border-b border-slate-200 py-6 md:grid-cols-[1fr_220px]">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                          Selected Roofing Package
+                        </div>
+
+                        <h3 className="mt-2 text-2xl font-black text-slate-900">
+                          {estimate.selected_option_name}
+                        </h3>
+
+                        <p className="mt-3 text-sm leading-6 text-slate-600">
+                          This proposal is based on the selected roofing option,
+                          verified roof measurements, and job conditions entered
+                          for this project. The final scope and pricing may be
+                          adjusted if hidden conditions, decking issues, code
+                          requirements, or requested upgrades are discovered.
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-900 p-5 text-white">
+                        <div className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                          Proposal Total
+                        </div>
+
+                        <div className="mt-2 text-4xl font-black">
+                          {formatMoney(estimate.selected_option_price)}
+                        </div>
+
+                        <div className="mt-2 text-sm text-slate-300">
+                          {estimate.payment_type === "Financing"
+                            ? `Financing · ${formatMoney(
+                                estimate.financing_down_payment
+                              )} down`
+                            : estimate.payment_type || "Payment type not set"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-5 border-b border-slate-200 py-6 md:grid-cols-3">
+                      <ProposalMetric
+                        label="Roof Squares"
+                        value={
+                          estimate.roof_squares
+                            ? `${estimate.roof_squares} SQ`
+                            : "Not entered"
+                        }
+                      />
+
+                      <ProposalMetric
+                        label="Waste"
+                        value={
+                          estimate.waste_percent
+                            ? `${estimate.waste_percent}%`
+                            : "Not entered"
+                        }
+                      />
+
+                      <ProposalMetric
+                        label="Order Squares"
+                        value={
+                          estimate.waste_squares
+                            ? `${estimate.waste_squares} SQ`
+                            : "Not entered"
+                        }
+                      />
+
+                      <ProposalMetric
+                        label="Pitch"
+                        value={estimate.pitch || "Not entered"}
+                      />
+
+                      <ProposalMetric
+                        label="Stories"
+                        value={estimate.stories || "Not entered"}
+                      />
+
+                      <ProposalMetric
+                        label="Job Type"
+                        value={estimate.job_type || "Not entered"}
+                      />
+                    </div>
+
+                    <div className="py-6">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Job Conditions
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <ConditionItem
+                          label="Solar present"
+                          value={estimate.has_solar}
+                        />
+                        <ConditionItem
+                          label="Gutters involved"
+                          value={estimate.has_gutters}
+                        />
+                        <ConditionItem
+                          label="Skylights present"
+                          value={estimate.has_skylights}
+                        />
+                        <ConditionItem
+                          label="Chimney present"
+                          value={estimate.has_chimney}
+                        />
+                        <ConditionItem
+                          label="Cricket needed"
+                          value={estimate.needs_cricket}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                      Internal Pricing Review
+                    </h2>
+                  </div>
+
+                  <div className="grid gap-4 p-5 md:grid-cols-4">
+                    <InternalMetric
+                      label="Customer Price"
+                      value={formatMoney(estimate.selected_option_price)}
+                    />
+                    <InternalMetric
+                      label="Cost"
+                      value={formatMoney(optionCost)}
+                    />
+                    <InternalMetric
+                      label="Gross Profit"
+                      value={formatMoney(optionProfit)}
+                    />
+                    <InternalMetric
+                      label="Gross Margin"
+                      value={
+                        optionMargin === null || optionMargin === undefined
+                          ? "—"
+                          : `${Number(optionMargin).toFixed(1)}%`
+                      }
+                    />
+                  </div>
+
+                  {primaryFlag && (
+                    <div className="border-t border-slate-200 px-5 py-4 text-sm text-slate-600">
+                      Primary flag: {primaryFlag}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <aside className="space-y-6">
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                      Proposal Actions
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-5">
+                    {estimate.status === "Proposal Created" && (
+                      <button
+                        onClick={() => updateProposalStatus("Proposal Sent")}
+                        disabled={savingStatus}
+                        className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Mark Proposal Sent
+                      </button>
+                    )}
+
+                    {(estimate.status === "Proposal Created" ||
+                      estimate.status === "Proposal Sent") && (
+                      <button
+                        onClick={() => updateProposalStatus("Proposal Signed")}
+                        disabled={savingStatus}
+                        className="w-full rounded-lg bg-green-600 px-5 py-3 text-sm font-bold text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Mark Proposal Signed
+                      </button>
+                    )}
+
+                    {(estimate.status === "Proposal Created" ||
+                      estimate.status === "Proposal Sent") && (
+                      <button
+                        onClick={() => updateProposalStatus("Lost")}
+                        disabled={savingStatus}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Mark Lost
+                      </button>
+                    )}
+
+                    {estimate.status === "Proposal Signed" && (
+                      <>
+                        <div className="rounded-lg bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
+                          Proposal signed. This job is ready for order creation.
+                        </div>
+
+                        <button
+                          onClick={() =>
+                            updateProposalStatus("Proposal Sent")
+                          }
+                          disabled={savingStatus}
+                          className="w-full rounded-lg border border-amber-300 bg-amber-50 px-5 py-3 text-sm font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                        >
+                          Revert to Proposal Sent
+                        </button>
+                      </>
+                    )}
+
+                    {estimate.status === "Lost" && (
+                      <>
+                        <div className="rounded-lg bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700">
+                          This proposal is marked lost.
+                        </div>
+
+                        <button
+                          onClick={() =>
+                            updateProposalStatus("Proposal Created")
+                          }
+                          disabled={savingStatus}
+                          className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          Reopen Proposal
+                        </button>
+                      </>
+                    )}
+
+                    {estimate.status === "Proposal Sent" && (
+                      <div className="rounded-lg bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700">
+                        Proposal sent. Waiting for customer decision.
+                      </div>
+                    )}
+
+                    {estimate.status === "Orders Created" && (
+                      <div className="rounded-lg bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-700">
+                        Orders have already been created.
+                      </div>
+                    )}
+
+                    {estimate.status === "Orders Sent" && (
+                      <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                        Orders have already been sent.
+                      </div>
+                    )}
+
+                    {savingStatus && (
+                      <p className="text-center text-sm font-semibold text-slate-500">
+                        Saving status...
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                      Next Step
+                    </h2>
+                  </div>
+
+                  <div className="space-y-4 p-5">
+                    <p className="text-sm text-slate-600">
+                      Once the proposal is signed, create material and labor
+                      orders.
+                    </p>
+
+                    <Link
+                      href={`/estimates/${estimate.id}/orders`}
+                      className={`block rounded-lg px-5 py-3 text-center text-sm font-bold ${
+                        canCreateOrders
+                          ? "bg-blue-600 text-white hover:bg-blue-700"
+                          : "pointer-events-none bg-slate-200 text-slate-500"
+                      }`}
+                    >
+                      Continue to Orders
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">
+                      Quick Links
+                    </h2>
+                  </div>
+
+                  <div className="space-y-3 p-5">
+                    <Link
+                      href={`/estimates/${estimate.id}/options`}
+                      className="block rounded-lg border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Estimate Options
+                    </Link>
+
+                    <Link
+                      href={`/estimates/${estimate.id}`}
+                      className="block rounded-lg border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Estimate Detail
+                    </Link>
+
+                    <Link
+                      href="/estimates"
+                      className="block rounded-lg border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      All Estimates
+                    </Link>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function ProposalMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-black text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function InternalMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-black text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function ConditionItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: boolean | null;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span
+        className={`rounded-full px-3 py-1 text-xs font-bold ${
+          value ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"
+        }`}
+      >
+        {value ? "Yes" : "No"}
+      </span>
+    </div>
+  );
+}

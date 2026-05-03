@@ -1,0 +1,82 @@
+import { supabase } from "@/lib/supabase";
+
+const TEST_ESTIMATE_ID = "1f78ae40-97ad-4e5c-9b84-aeba7845c1d2";
+
+export default async function Home() {
+  const { data, error } = await supabase
+    .from("estimate_option_sales_comparison")
+    .select(
+      `
+      option_name,
+      is_primary,
+      subtotal_price,
+      gross_margin_percent,
+      price_difference_display,
+      comparison_status
+      `
+    )
+    .eq("estimate_id", TEST_ESTIMATE_ID)
+    .order("subtotal_price", { ascending: true });
+
+  if (error) {
+    return (
+      <main className="min-h-screen p-8">
+        <h1 className="text-2xl font-bold">Supabase connection error</h1>
+        <pre className="mt-4 rounded bg-red-50 p-4 text-sm text-red-700">
+          {error.message}
+        </pre>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 p-8">
+      <div className="mx-auto max-w-6xl">
+        <h1 className="text-3xl font-bold text-slate-900">
+          Roofing Estimate Options
+        </h1>
+
+        <p className="mt-2 text-slate-600">
+          Test estimate: Avonmore / HDZ Standard primary comparison
+        </p>
+
+        <div className="mt-8 overflow-hidden rounded-xl border bg-white shadow-sm">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-slate-100 text-slate-700">
+              <tr>
+                <th className="p-4">Option</th>
+                <th className="p-4">Primary</th>
+                <th className="p-4 text-right">Price</th>
+                <th className="p-4 text-right">Gross Margin</th>
+                <th className="p-4 text-right">Difference</th>
+                <th className="p-4">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.map((row) => (
+                <tr key={row.option_name} className="border-t">
+                  <td className="p-4 font-medium text-slate-900">
+                    {row.option_name}
+                  </td>
+                  <td className="p-4">
+                    {row.is_primary ? "Yes" : "No"}
+                  </td>
+                  <td className="p-4 text-right">
+                    ${Number(row.subtotal_price).toLocaleString()}
+                  </td>
+                  <td className="p-4 text-right">
+                    {Number(row.gross_margin_percent).toFixed(2)}%
+                  </td>
+                  <td className="p-4 text-right">
+                    {row.price_difference_display}
+                  </td>
+                  <td className="p-4">{row.comparison_status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  );
+}
